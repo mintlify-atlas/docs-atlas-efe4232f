@@ -1,0 +1,187 @@
+---
+title: Content Addressing
+description: How llmake uses SHA-256 hashing to track file changes and enable incremental builds
+---
+
+Content addressing is the foundation of llmake's incremental build system. By computing cryptographic hashes of your source files, llmake can detect exactly what has changed since the last run and skip tasks that don't need to be regenerated.
+
+## How It Works
+
+llmake uses **SHA-256 hashing** to create a unique fingerprint for each source file. When you run a task, llmake:
+
+1. Computes hashes for all files matching the task's source patterns
+2. Compares these hashes against the previous run (stored in `.llmake.lock`)
+3. If any file has changed, the task runs; otherwise, it's skipped
+
+This approach is called "content addressing" because files are identified by their content, not their timestamps or file paths.
+
+## Per-File Hashing
+
+Each source file is hashed individually using SHA-256. llmake uses streaming to avoid loading large files entirely into memory:
+
+```typescript
+/**
+ * Hash a file using SHA-256 streaming to avoid OOM on large files.
+ * @param path - Path to the file to hash
+ * @returns Promise resolving to "sha256:<hex>" format hash
+ */
+export async function hashFile(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hasher = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hasher.update(chunk));
+    stream.on("end", () => resolve(`sha256:${hasher.digest("hex")}`));
+    stream.on("error", reject);
+  });
+}
+```
+
+<Info>
+All hashes are stored in the format `sha256:<hex>` for clarity and future extensibility.
+</Info>
+
+## Merkle Root for Fast Comparisons
+
+While per-file hashes are essential for determining *which* files changed, checking every file individually on each run would be expensive. llmake uses a **Merkle root** to answer the question "did anything change?" in constant time.
+
+A Merkle root is a single hash computed from all the individual file hashes. If the Merkle root matches the previous run, llmake knows immediately that nothing changed:
+
+```typescript
+/**
+ * Compute Merkle root from file hashes.
+ * Sorts paths lexicographically and hashes "path:hash\n" for each entry.
+ * @param fileHashes - Record mapping file paths to their hashes
+ * @returns Merkle root in "sha256:<hex>" format
+ */
+export function computeMerkleRoot(fileHashes: Record<string, string>): string {
+  const hasher = createHash("sha256");
+  const sortedPaths = Object.keys(fileHashes).sort();
+  for (const path of sortedPaths) {
+    hasher.update(`${path}:${fileHashes[path]}\n`);
+  }
+  return `sha256:${hasher.digest("hex")}`;
+}
+```
+
+The algorithm:
+1. Sort all file paths lexicographically for deterministic ordering
+2. For each file, concatenate `path:hash\n`
+3. Hash the entire concatenated string to produce the Merkle root
+
+<Tip>
+The Merkle root check is a performance optimization. If it matches, llmake skips the task without comparing individual files. If it differs, llmake falls back to per-file comparison to determine exactly what changed.
+</Tip>
+
+## Two-Tier Change Detection
+
+llmake's change detection operates in two tiers:
+
+### Fast Path: Merkle Root Match
+If the current Merkle root equals the lockfile's `sources_hash`, the task is skipped entirely. This is the common case when nothing has changed.
+
+```typescript
+// Quick check: Merkle root match → skip
+if (lockEntry.sources_hash === currentRoot) {
+  return {
+    task: taskName,
+    changed: false,
+    changed_files: [],
+    removed_files: [],
+    all_files: allFiles,
+  };
+}
+```
+
+### Slow Path: Per-File Diff
+If the Merkle root differs, llmake compares each file's hash individually to identify exactly which files changed or were removed:
+
+```typescript
+// Slow path: per-file diff
+const changed: string[] = [];
+const removed: string[] = [];
+
+for (const [path, hash] of Object.entries(currentFiles)) {
+  if (lockEntry.files[path] !== hash) {
+    changed.push(path);
+  }
+}
+
+for (const path of Object.keys(lockEntry.files)) {
+  if (!(path in currentFiles)) {
+    removed.push(path);
+  }
+}
+```
+
+This information is then passed to the LLM so it knows which files to focus on.
+
+## Why Content Addressing?
+
+Content addressing provides several advantages over timestamp-based approaches:
+
+<CardGroup cols={2}>
+  <Card title="Reliable" icon="check">
+    Timestamps can be misleading (e.g., `git checkout` changes file mtimes without changing content). Hashes never lie.
+  </Card>
+  <Card title="Deterministic" icon="repeat">
+    The same file content always produces the same hash, regardless of when or where it's computed.
+  </Card>
+  <Card title="Fast" icon="bolt">
+    Merkle roots enable O(1) "anything changed?" checks instead of O(n) file comparisons.
+  </Card>
+  <Card title="Portable" icon="arrows-rotate">
+    Lockfiles can be safely shared across machines and CI environments without timestamp sync issues.
+  </Card>
+</CardGroup>
+
+## Incremental Builds
+
+Content addressing is what enables llmake's incremental build capability:
+
+- **Local development**: Only regenerate files when their sources actually change
+- **CI/CD**: Commit `.llmake.lock` to skip unchanged tasks in CI builds
+- **Team consistency**: Everyone sees the same change detection behavior
+- **Audit trail**: The lockfile records exactly when each task last ran
+
+<Note>
+When you run `llmake --status`, you're seeing the result of content addressing: llmake compares current file hashes against the lockfile to show you which tasks have pending changes.
+</Note>
+
+## Example: Detecting Changes
+
+Given a task with these sources:
+```
+src/index.ts   -> sha256:abc123...
+src/config.ts  -> sha256:def456...
+```
+
+And a lockfile entry:
+```json
+{
+  "sources_hash": "sha256:xyz789...",
+  "files": {
+    "src/index.ts": "sha256:abc123...",
+    "src/config.ts": "sha256:old_hash..."
+  }
+}
+```
+
+llmake's change detection:
+1. Computes new Merkle root from current hashes
+2. Compares against lockfile's `sources_hash` (`xyz789...`)
+3. Merkle root differs → performs per-file comparison
+4. Finds `src/config.ts` has changed (`def456...` ≠ `old_hash...`)
+5. Passes `src/config.ts` to the LLM in `<changed-files>`
+
+The LLM can now focus on updates related to `src/config.ts` rather than processing all source files.
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Lockfile" icon="lock" href="/concepts/lockfile">
+    Learn how the lockfile stores hashes and enables incremental builds
+  </Card>
+  <Card title="Prompt Assembly" icon="layer-group" href="/concepts/prompt-assembly">
+    See how changed files are communicated to the LLM
+  </Card>
+</CardGroup>

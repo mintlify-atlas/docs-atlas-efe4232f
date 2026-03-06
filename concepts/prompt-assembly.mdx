@@ -1,0 +1,284 @@
+---
+title: Prompt Assembly
+description: How llmake constructs and executes LLM prompts from your task configuration
+---
+
+When a task runs, llmake assembles a structured prompt that tells your LLM what to do and provides context about which files have changed. This prompt is then safely passed to your configured runner command for execution.
+
+## The XML Format
+
+llmake uses a simple XML format to communicate with LLM runners:
+
+```xml
+<prompt>Your task prompt here</prompt>
+<changed-files>src/foo.ts, src/bar.ts</changed-files>
+```
+
+This format is:
+- **Structured**: Easy for LLMs to parse and understand
+- **Explicit**: Clearly separates the instruction from the file list
+- **Compact**: Minimal overhead while remaining human-readable
+
+## Assembly Process
+
+The `assemblePrompt` function takes your task's prompt and the list of changed files, then combines them into the XML format:
+
+```typescript
+/**
+ * Build an XML-formatted prompt combining user prompt and changed files.
+ */
+export function assemblePrompt(
+  userPrompt: string,
+  changedFiles: string[]
+): string {
+  return [
+    `<prompt>${userPrompt}</prompt>`,
+    `<changed-files>${changedFiles.join(", ")}</changed-files>`,
+  ].join("\n");
+}
+```
+
+<Info>
+If no files have changed but you're using `--force`, the `<changed-files>` element will still be included (potentially empty or with all files listed, depending on the force mode).
+</Info>
+
+## Example Assembly
+
+Given a task configuration:
+
+```jsonc
+{
+  "prompt": "Update README.md based on the current codebase. Keep it concise.",
+  "sources": ["src/**/*.ts"]
+}
+```
+
+And detected changes in `src/index.ts` and `src/config.ts`, llmake assembles:
+
+```xml
+<prompt>Update README.md based on the current codebase. Keep it concise.</prompt>
+<changed-files>src/index.ts, src/config.ts</changed-files>
+```
+
+This prompt tells the LLM:
+1. What to do (update README.md)
+2. Which files changed (focus areas for the update)
+
+## Shell Execution
+
+After assembling the prompt, llmake executes your runner command by substituting the prompt into the `{prompt}` placeholder. This happens through the `executeRunner` function:
+
+```typescript
+/**
+ * Execute a runner template as a login shell command.
+ * Uses -l -i flags to ensure user's PATH is loaded from .zshrc/.bashrc.
+ */
+export async function executeRunner(
+  runnerTemplate: string,
+  prompt: string
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const shell = process.env.SHELL || "/bin/sh";
+  const shescape = new Shescape({ shell });
+  const quoted = shescape.quote(prompt);
+  const command = runnerTemplate.replace("{prompt}", quoted);
+
+  return new Promise((resolve) => {
+    const proc = spawn(shell, ["-l", "-i", "-c", command], {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        FORCE_COLOR: "1",
+      },
+    });
+
+    proc.on("close", (code) => {
+      resolve({ exitCode: code ?? 1, stdout: "", stderr: "" });
+    });
+  });
+}
+```
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Login Shell" icon="terminal">
+    Uses `-l -i` flags to load your full shell environment from `.zshrc` or `.bashrc`
+  </Card>
+  <Card title="Safe Escaping" icon="shield">
+    Uses `shescape` library to safely quote the prompt before substitution
+  </Card>
+  <Card title="Color Support" icon="palette">
+    Sets `FORCE_COLOR=1` to preserve terminal colors in the runner output
+  </Card>
+  <Card title="Current Directory" icon="folder">
+    Runs in your current working directory for proper file resolution
+  </Card>
+</CardGroup>
+
+## Shell Escaping
+
+Shell injection is a serious security concern. llmake uses the [shescape](https://www.npmjs.com/package/shescape) library to safely quote the prompt before passing it to the shell:
+
+```typescript
+const shescape = new Shescape({ shell });
+const quoted = shescape.quote(prompt);
+const command = runnerTemplate.replace("{prompt}", quoted);
+```
+
+This ensures that special characters in your prompt (like quotes, backticks, or dollar signs) are properly escaped and treated as literal text.
+
+<Warning>
+Always use the `{prompt}` placeholder in your runner command. Never try to interpolate the prompt yourself - you'll lose the security benefits of automatic escaping.
+</Warning>
+
+## Login Shell Benefits
+
+llmake executes runners using your login shell with the `-l -i` flags:
+
+```typescript
+const proc = spawn(shell, ["-l", "-i", "-c", command], {
+  // ...
+});
+```
+
+This ensures:
+- Your `PATH` is loaded from `.zshrc`, `.bashrc`, or equivalent
+- Shell aliases and functions are available
+- Environment variables from your shell config are set
+- The runner behaves exactly as it would in your normal terminal
+
+<Tip>
+If your runner command isn't found, make sure it's in your `PATH` in your shell's rc file (`.zshrc`, `.bashrc`, etc.), not just in your terminal session.
+</Tip>
+
+## Runner Command Format
+
+Your runner command must include the `{prompt}` placeholder where llmake will substitute the assembled prompt:
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}"
+}
+```
+
+After substitution and escaping, this becomes something like:
+
+```bash
+claude --allowed-tools Read,Write,Edit --print '<prompt>Update README.md...</prompt>
+<changed-files>src/index.ts, src/config.ts</changed-files>'
+```
+
+## Task-Specific Runners
+
+You can override the default runner on a per-task basis:
+
+```jsonc
+{
+  "runner": "claude --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md",
+      "sources": ["src/**/*.ts"]
+      // Uses default runner
+    },
+    "api-docs": {
+      "prompt": "Generate API documentation",
+      "sources": ["src/index.ts", "src/types.ts"],
+      "runner": "llm -m gpt-4o {prompt}"  // Override
+    }
+  }
+}
+```
+
+This allows you to:
+- Use different LLM providers for different tasks
+- Switch to faster/cheaper models for simple tasks
+- Use specialized models for domain-specific tasks
+
+## Changed Files Context
+
+The `<changed-files>` element provides crucial context to the LLM:
+
+1. **First run**: All files matched by the task's source patterns
+2. **Incremental run**: Only files that have changed since the last run
+3. **Forced run**: Depends on the force mode (may be all files or empty)
+
+This allows the LLM to focus its attention on the relevant parts of your codebase rather than processing everything from scratch each time.
+
+<Note>
+The changed files list comes from llmake's content addressing system, which compares current file hashes against the lockfile. See the [Content Addressing](/concepts/content-addressing) page for details.
+</Note>
+
+## Error Handling
+
+If the runner command exits with a non-zero code, llmake reports the failure and does not update the lockfile. This means:
+
+- The task will be marked as stale on the next run
+- You can inspect what went wrong and fix it
+- Running again will retry the task
+
+```typescript
+proc.on("close", (code) => {
+  resolve({ exitCode: code ?? 1, stdout: "", stderr: "" });
+});
+```
+
+<Warning>
+If your runner occasionally fails (e.g., due to rate limits or transient errors), llmake will mark the task as failed. Run the task again when ready - llmake will detect that the sources haven't changed but the lockfile wasn't updated, and will retry.
+</Warning>
+
+## Runner Examples
+
+llmake is runner-agnostic and works with any CLI that accepts a prompt:
+
+```bash
+# Claude CLI
+claude --allowed-tools Read,Write,Edit --print {prompt}
+
+# OpenAI via llm CLI
+llm -m gpt-4o {prompt}
+
+# Anthropic via llm CLI
+llm -m claude-3-opus {prompt}
+
+# Local models via Ollama
+ollama run llama3 {prompt}
+
+# Custom script
+./scripts/generate.sh {prompt}
+```
+
+The only requirement is that the runner:
+1. Accepts the prompt as a command-line argument
+2. Performs the necessary file operations (reading sources, writing outputs)
+3. Exits with code 0 on success
+
+## Debugging Prompts
+
+To see the exact prompt llmake would send without executing the runner, use `--dry-run`:
+
+```bash
+llmake --dry-run readme
+```
+
+This will show you:
+- The assembled XML prompt
+- The runner command that would be executed
+- Which files are considered changed
+
+This is useful for:
+- Verifying your prompt template
+- Checking which files llmake detected as changed
+- Testing glob patterns before running expensive LLM operations
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Content Addressing" icon="fingerprint" href="/concepts/content-addressing">
+    Learn how llmake determines which files have changed
+  </Card>
+  <Card title="Lockfile" icon="lock" href="/concepts/lockfile">
+    See how task results are stored for incremental builds
+  </Card>
+</CardGroup>

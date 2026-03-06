@@ -1,0 +1,408 @@
+---
+title: "Runner Examples"
+description: "Configure different LLM CLIs and custom scripts as llmake runners"
+---
+
+llmake is runner-agnostic. The `runner` field in your config specifies the command to execute when a task needs to run. The only requirement is that your runner accepts a prompt as input—llmake will substitute `{prompt}` with the assembled prompt text.
+
+## The Runner Template
+
+Every runner must include the `{prompt}` placeholder:
+
+```jsonc
+{
+  "runner": "your-cli {prompt}"
+}
+```
+
+At execution time, llmake:
+1. Assembles the prompt in XML format
+2. Shell-escapes the prompt for safety
+3. Substitutes `{prompt}` with the escaped prompt
+4. Executes the command in a login shell
+
+From `src/runner.ts:21`:
+
+```typescript
+export async function executeRunner(
+  runnerTemplate: string,
+  prompt: string
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const shell = process.env.SHELL || "/bin/sh";
+  const shescape = new Shescape({ shell });
+  const quoted = shescape.quote(prompt);
+  const command = runnerTemplate.replace("{prompt}", quoted);
+
+  return new Promise((resolve) => {
+    const proc = spawn(shell, ["-l", "-i", "-c", command], {
+      cwd: process.cwd(),
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        FORCE_COLOR: "1",
+      },
+    });
+    // ...
+  });
+}
+```
+
+<Note>
+Runners are executed in a login shell (`-l -i`) to ensure your PATH and environment variables are loaded from `.zshrc`, `.bashrc`, or similar shell config files.
+</Note>
+
+## Claude Code
+
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) is a CLI tool from Anthropic that gives Claude access to your filesystem.
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}"
+}
+```
+
+### Flags Explained
+
+- `--allowed-tools Read,Write,Edit`: Grants Claude permission to read files, write new files, and edit existing ones
+- `--print`: Shows the AI's response in the terminal as it works
+
+<Tip>
+Claude Code requires authentication. Run `claude auth` first to set up your API key.
+</Tip>
+
+### Full Example
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md based on the current codebase. Keep it concise.",
+      "sources": ["src/**/*.ts"],
+      "exclude": ["src/**/*.test.ts"]
+    }
+  }
+}
+```
+
+## OpenAI via llm CLI
+
+The [llm](https://llm.datasette.io/) CLI by Simon Willison supports multiple LLM providers, including OpenAI.
+
+```jsonc
+{
+  "runner": "llm -m gpt-4o {prompt}"
+}
+```
+
+### Model Selection
+
+- `gpt-4o`: Most capable GPT-4 model, good for complex tasks
+- `gpt-4o-mini`: Faster and cheaper, good for simple tasks
+- `gpt-4-turbo`: Previous generation, still very capable
+
+### With System Prompt
+
+```jsonc
+{
+  "runner": "llm -m gpt-4o -s 'You are a technical documentation expert.' {prompt}"
+}
+```
+
+### Full Example
+
+```jsonc
+{
+  "runner": "llm -m gpt-4o {prompt}",
+  "tasks": {
+    "api-docs": {
+      "prompt": "Generate API documentation for the public exports.",
+      "sources": ["src/index.ts", "src/types.ts"]
+    }
+  }
+}
+```
+
+## Anthropic via llm CLI
+
+The `llm` CLI also supports Anthropic's Claude models:
+
+```jsonc
+{
+  "runner": "llm -m claude-3-opus {prompt}"
+}
+```
+
+### Available Models
+
+- `claude-3-opus`: Most capable Claude model
+- `claude-3-sonnet`: Balanced performance and cost
+- `claude-3-haiku`: Fastest and most affordable
+
+### With Streaming
+
+```jsonc
+{
+  "runner": "llm -m claude-3-opus --stream {prompt}"
+}
+```
+
+<Note>
+Both OpenAI and Anthropic support via `llm` require API keys. Set them via environment variables or `llm` configuration. See [llm documentation](https://llm.datasette.io/) for setup.
+</Note>
+
+## Ollama (Local Models)
+
+[Ollama](https://ollama.ai/) lets you run LLMs locally on your machine.
+
+```jsonc
+{
+  "runner": "ollama run llama3 {prompt}"
+}
+```
+
+### Popular Models
+
+```jsonc
+// Meta's Llama 3
+"runner": "ollama run llama3 {prompt}"
+
+// Mistral
+"runner": "ollama run mistral {prompt}"
+
+// Code-specialized model
+"runner": "ollama run codellama {prompt}"
+
+// Phi-3 (Microsoft's small model)
+"runner": "ollama run phi3 {prompt}"
+```
+
+### Full Example
+
+```jsonc
+{
+  "runner": "ollama run llama3 {prompt}",
+  "tasks": {
+    "comments": {
+      "prompt": "Add helpful comments to exported functions",
+      "sources": ["src/**/*.ts"]
+    }
+  }
+}
+```
+
+<Tip>
+Local models are great for privacy-sensitive projects or when you want to avoid API costs. Make sure you have enough RAM—most models need 8GB+.
+</Tip>
+
+## Custom Scripts
+
+You can use any executable script as a runner. This is useful for:
+- Custom preprocessing
+- Using proprietary LLM APIs
+- Adding logging or metrics
+- Chaining multiple tools
+
+### Bash Script
+
+```bash
+#!/bin/bash
+# scripts/generate.sh
+
+PROMPT="$1"
+
+# Your custom logic here
+echo "Running generation with prompt: $PROMPT"
+
+# Call your LLM API
+curl -X POST https://api.example.com/generate \
+  -H "Content-Type: application/json" \
+  -d "{\"prompt\": \"$PROMPT\"}"
+```
+
+```jsonc
+{
+  "runner": "./scripts/generate.sh {prompt}"
+}
+```
+
+### Node.js Script
+
+```javascript
+#!/usr/bin/env node
+// scripts/generate.js
+
+const prompt = process.argv[2];
+
+async function generate(prompt) {
+  // Your custom generation logic
+  const response = await fetch('https://api.example.com/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt })
+  });
+  
+  const result = await response.json();
+  console.log(result.text);
+}
+
+generate(prompt);
+```
+
+```jsonc
+{
+  "runner": "node scripts/generate.js {prompt}"
+}
+```
+
+<Note>
+Make sure custom scripts are executable: `chmod +x scripts/generate.sh`
+</Note>
+
+## Task-Level Runner Overrides
+
+You can override the default runner for specific tasks. This is useful when different tasks have different requirements.
+
+### Example: Mixed Models
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md based on the current codebase",
+      "sources": ["src/**/*.ts"]
+      // Uses default runner: Claude Code
+    },
+    "quick-task": {
+      "prompt": "Fix typos in code comments",
+      "sources": ["src/**/*.ts"],
+      "runner": "llm -m gpt-4o-mini {prompt}"  // Fast, cheap override
+    },
+    "complex-analysis": {
+      "prompt": "Perform deep code analysis and suggest optimizations",
+      "sources": ["src/**/*.ts"],
+      "runner": "llm -m gpt-4o {prompt}"  // Most capable model
+    }
+  }
+}
+```
+
+### Use Cases for Overrides
+
+<CardGroup cols={2}>
+  <Card title="Cost Optimization" icon="dollar-sign">
+    Use cheaper models for simple tasks like fixing typos or formatting
+  </Card>
+  <Card title="Speed vs Quality" icon="gauge">
+    Fast models for iterative tasks, powerful models for one-time generation
+  </Card>
+  <Card title="Local vs Remote" icon="server">
+    Local models for frequent tasks, API models for complex reasoning
+  </Card>
+  <Card title="Tool Requirements" icon="wrench">
+    Some tasks need filesystem access (Claude Code), others just need text generation
+  </Card>
+</CardGroup>
+
+### Example: Local for Frequent, Remote for Complex
+
+```jsonc
+{
+  "runner": "ollama run llama3 {prompt}",  // Default: local, fast, free
+  "tasks": {
+    "format-comments": {
+      "prompt": "Format JSDoc comments consistently",
+      "sources": ["src/**/*.ts"]
+      // Uses local Ollama
+    },
+    "architecture-docs": {
+      "prompt": "Generate comprehensive architecture documentation",
+      "sources": ["src/**/*.ts"],
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}"
+      // Override: Use Claude for complex task
+    }
+  }
+}
+```
+
+## The Assembled Prompt Format
+
+Regardless of which runner you use, llmake sends prompts in a consistent XML format. From `src/runner.ts:7`:
+
+```typescript
+export function assemblePrompt(
+  userPrompt: string,
+  changedFiles: string[]
+): string {
+  return [
+    `<prompt>${userPrompt}</prompt>`,
+    `<changed-files>${changedFiles.join(", ")}</changed-files>`,
+  ].join("\n");
+}
+```
+
+For example, if `src/index.ts` and `src/config.ts` changed, your LLM receives:
+
+```xml
+<prompt>Update README.md based on the current codebase</prompt>
+<changed-files>src/index.ts, src/config.ts</changed-files>
+```
+
+This tells your LLM:
+- What to do (from your task's `prompt` field)
+- Which files changed (so it can focus on relevant updates)
+
+<Tip>
+The `<changed-files>` tag helps your LLM understand **what changed**, not just **what exists**. This context leads to more accurate, focused updates.
+</Tip>
+
+## Troubleshooting
+
+### Runner Not Found
+
+```
+llmake: runner command failed: command not found
+```
+
+**Solutions:**
+- Make sure the CLI tool is installed (`which claude`, `which llm`, `which ollama`)
+- If using a global install, ensure it's in your PATH
+- Try the full path: `"runner": "/usr/local/bin/claude --print {prompt}"`
+
+### Authentication Errors
+
+```
+Error: API key not found
+```
+
+**Solutions:**
+- Set up API keys for your LLM provider
+- For `llm`: Run `llm keys set openai` or `llm keys set anthropic`
+- For Claude Code: Run `claude auth`
+- For Ollama: No auth needed, but ensure the service is running (`ollama serve`)
+
+### Prompt Too Large
+
+Some LLMs have context limits. If your prompt exceeds them:
+
+- Use more specific `sources` patterns to track fewer files
+- Add exclusions to filter out large or irrelevant files
+- Consider splitting into multiple tasks with narrower scopes
+
+## Best Practices
+
+<Steps>
+  <Step title="Start with the default runner">
+    Choose one LLM CLI as your default for most tasks
+  </Step>
+  <Step title="Test with --dry-run">
+    Verify your runner command works: `llmake --dry-run`
+  </Step>
+  <Step title="Add task-specific overrides">
+    Use cheaper/faster models for simple tasks, powerful ones for complex tasks
+  </Step>
+  <Step title="Consider local models">
+    For frequent, privacy-sensitive, or offline work, local models via Ollama are excellent
+  </Step>
+</Steps>

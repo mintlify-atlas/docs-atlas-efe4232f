@@ -1,0 +1,294 @@
+---
+title: Tasks
+description: Configure code generation tasks in llmake
+---
+
+Tasks are the core unit of work in llmake. Each task defines what files to watch, what prompt to use, and optionally what runner to execute.
+
+## Task Configuration
+
+Tasks are defined in the `tasks` object of your config file, where each key is the task name and the value is a `TaskConfig` object.
+
+<CodeGroup>
+```typescript src/types.ts
+/**
+ * Configuration for a single llmake task.
+ * Defines what files to process and how to generate code from them.
+ */
+export interface TaskConfig {
+  /** The prompt template or instruction for the code generation. */
+  prompt: string;
+  /** Glob patterns for source files to include. */
+  sources: string[];
+  /** Optional glob patterns for files to exclude from sources. */
+  exclude?: string[];
+  /** Optional runner override for this specific task. */
+  runner?: string;
+}
+```
+</CodeGroup>
+
+## Task Fields
+
+<ParamField path="prompt" type="string" required>
+  The prompt or instruction that will be sent to your LLM runner. This tells the LLM what to generate or update.
+  
+  **Validation**: Must be a non-empty string.
+  
+  ```jsonc
+  {
+    "prompt": "Update README.md based on the current codebase. Keep it concise."
+  }
+  ```
+</ParamField>
+
+<ParamField path="sources" type="string[]" required>
+  Array of glob patterns matching the source files to watch. When any of these files change, the task is marked as stale.
+  
+  **Validation**: Must be a non-empty array.
+  
+  ```jsonc
+  {
+    "sources": [
+      "src/**/*.ts",           // All TypeScript files in src/
+      "package.json",          // Specific file
+      "{src,lib}/**/*.ts"      // Multiple directories
+    ]
+  }
+  ```
+  
+  See [Glob Patterns](#glob-patterns) for more details.
+</ParamField>
+
+<ParamField path="exclude" type="string[]">
+  Optional array of glob patterns to exclude from the matched source files. Useful for excluding test files or specific directories.
+  
+  ```jsonc
+  {
+    "sources": ["src/**/*.ts"],
+    "exclude": [
+      "src/**/*.test.ts",
+      "src/**/*.spec.ts",
+      "src/**/__tests__/**"
+    ]
+  }
+  ```
+</ParamField>
+
+<ParamField path="runner" type="string">
+  Optional runner override for this specific task. If not specified, the default `runner` from the top-level config is used.
+  
+  **Validation**: Must contain the `{prompt}` placeholder.
+  
+  ```jsonc
+  {
+    "runner": "llm -m gpt-4o-mini {prompt}"
+  }
+  ```
+  
+  See [Runners](/configuration/runners) for more details.
+</ParamField>
+
+## Validation Schema
+
+llmake validates each task configuration using this Zod schema:
+
+<CodeGroup>
+```typescript src/config.ts
+const TaskConfigSchema = z
+  .object({
+    prompt: z.string().min(1, "prompt must not be empty"),
+    sources: z.array(z.string()).min(1, "sources must not be empty"),
+    exclude: z.array(z.string()).optional(),
+    runner: z
+      .string()
+      .refine(
+        (s) => s.includes("{prompt}"),
+        "runner must contain {prompt} placeholder"
+      )
+      .optional(),
+  })
+  .passthrough();
+```
+</CodeGroup>
+
+## Example Tasks
+
+### README Generator
+
+```jsonc
+{
+  "readme": {
+    "prompt": "Update README.md based on the current codebase. Keep it concise.",
+    "sources": ["src/**/*.ts"],
+    "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
+  }
+}
+```
+
+### API Documentation
+
+```jsonc
+{
+  "api-docs": {
+    "prompt": "Generate API documentation for the public exports.",
+    "sources": ["src/index.ts", "src/types.ts"],
+    "runner": "llm -m gpt-4o {prompt}"
+  }
+}
+```
+
+### Changelog Generator
+
+```jsonc
+{
+  "changelog": {
+    "prompt": "Update CHANGELOG.md with recent changes.",
+    "sources": ["src/**/*.ts", "package.json"]
+  }
+}
+```
+
+### Type Definitions
+
+```jsonc
+{
+  "types": {
+    "prompt": "Generate TypeScript type definitions from the OpenAPI spec.",
+    "sources": ["api/openapi.yaml"],
+    "runner": "claude --allowed-tools Read,Write {prompt}"
+  }
+}
+```
+
+## Complete Example
+
+Here's a full configuration with multiple tasks:
+
+<Tabs>
+  <Tab title="JSONC">
+    ```jsonc
+    {
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": {
+        "readme": {
+          "prompt": "Update README.md based on the current codebase. Keep it concise.",
+          "sources": ["src/**/*.ts"],
+          "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
+        },
+        "api-docs": {
+          "prompt": "Generate API documentation for the public exports.",
+          "sources": ["src/index.ts", "src/types.ts"],
+          "runner": "llm -m gpt-4o {prompt}"
+        },
+        "changelog": {
+          "prompt": "Update CHANGELOG.md with recent changes.",
+          "sources": ["src/**/*.ts", "package.json"]
+        }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import type { LlmakeConfig } from "llmake";
+
+    export default {
+      runner: "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      tasks: {
+        readme: {
+          prompt: "Update README.md based on the current codebase. Keep it concise.",
+          sources: ["src/**/*.ts"],
+          exclude: ["src/**/*.test.ts", "src/**/*.spec.ts"],
+        },
+        "api-docs": {
+          prompt: "Generate API documentation for the public exports.",
+          sources: ["src/index.ts", "src/types.ts"],
+          runner: "llm -m gpt-4o {prompt}",
+        },
+        changelog: {
+          prompt: "Update CHANGELOG.md with recent changes.",
+          sources: ["src/**/*.ts", "package.json"],
+        },
+      },
+    } satisfies LlmakeConfig;
+    ```
+  </Tab>
+</Tabs>
+
+## Glob Patterns
+
+Source and exclude patterns follow standard glob syntax:
+
+| Pattern | Matches |
+|---------|---------|
+| `src/**/*.ts` | All `.ts` files in `src/` recursively |
+| `*.md` | All `.md` files in root |
+| `src/*.ts` | `.ts` files directly in `src/` (not nested) |
+| `{src,lib}/**/*.ts` | `.ts` files in both `src/` and `lib/` |
+
+### Exclude Patterns
+
+Exclude patterns remove files from the matched set. They're applied **after** source patterns are matched:
+
+```jsonc
+{
+  "sources": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",      // Remove test files
+    "src/**/*.spec.ts",      // Remove spec files
+    "src/**/__tests__/**"    // Remove test directories
+  ]
+}
+```
+
+<Note>
+Exclude patterns are optional but recommended to avoid watching test files, build outputs, or other generated content.
+</Note>
+
+## How Tasks Are Executed
+
+When you run `llmake`, each task goes through this process:
+
+1. **Glob matching**: Source patterns are matched against the filesystem, then exclude patterns are applied
+2. **Hash computation**: Each matched file is hashed using SHA-256
+3. **Change detection**: Hashes are compared against `.llmake.lock`
+4. **Prompt assembly**: If changed, the prompt and changed file list are assembled into XML
+5. **Runner execution**: The runner command is executed with the assembled prompt
+
+See [Content Addressing](/concepts/content-addressing) and [Prompt Assembly](/concepts/prompt-assembly) for more details on the execution process.
+
+## Task Naming
+
+Task names can be any valid object key:
+
+```jsonc
+{
+  "tasks": {
+    "readme": { /* ... */ },           // Simple name
+    "api-docs": { /* ... */ },         // Hyphenated
+    "generate_types": { /* ... */ },   // Underscored
+    "updateChangelog": { /* ... */ }   // camelCase
+  }
+}
+```
+
+Use task names with the CLI:
+
+```bash
+llmake readme              # Run specific task
+llmake api-docs            # Run hyphenated task
+llmake --force readme      # Force run task
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Runners" icon="terminal" href="/configuration/runners">
+    Configure runners for different LLM providers
+  </Card>
+  <Card title="CLI Reference" icon="rectangle-terminal" href="/cli/commands">
+    Learn how to run tasks from the command line
+  </Card>
+</CardGroup>

@@ -1,0 +1,129 @@
+---
+title: Introduction
+description: Learn about llmake, a content-addressed build system that uses LLMs to keep derived files in sync with your source code
+---
+
+llmake is a content-addressed, declarative, LLM-powered build system for derived files. Think of it as `make`, but where the compiler is an LLM.
+
+<Note>
+`make` where the compiler is an LLM.
+</Note>
+
+## What Problems Does It Solve?
+
+Ever forget to update your README when your API changes? Or waste time regenerating documentation when nothing has changed? llmake solves these problems by:
+
+1. **Tracking changes automatically** - Uses SHA-256 hashes to detect when source files change
+2. **Running only when needed** - Skips regeneration if sources haven't changed
+3. **Keeping teams in sync** - Lockfile ensures consistent state across developers and CI
+
+## How It Works
+
+llmake follows a simple four-step process:
+
+<Steps>
+  <Step title="Hash your source files">
+    Computes SHA-256 hashes for each source file in your task configuration
+  </Step>
+  
+  <Step title="Compare against lockfile">
+    Checks `.llmake.lock` to see if any files have changed since the last run
+  </Step>
+  
+  <Step title="Run LLM when needed">
+    If files changed: assembles a prompt → runs your LLM CLI → updates lockfile
+  </Step>
+  
+  <Step title="Skip when unchanged">
+    If nothing changed: skips execution entirely
+  </Step>
+</Steps>
+
+No more regenerating docs when nothing changed. No more forgetting to update generated files when sources change.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Content-Addressed" icon="fingerprint">
+    Uses SHA-256 hashing to track file changes with per-file granularity
+  </Card>
+  
+  <Card title="LLM-Powered" icon="brain">
+    Leverages any LLM CLI to generate and update derived files intelligently
+  </Card>
+  
+  <Card title="Runner-Agnostic" icon="plug">
+    Works with Claude Code, OpenAI, local models via Ollama, or custom scripts
+  </Card>
+  
+  <Card title="Declarative Config" icon="file-code">
+    Simple configuration in JSON, JSONC, TOML, or TypeScript
+  </Card>
+  
+  <Card title="Incremental Builds" icon="arrows-rotate">
+    Only processes tasks where source files have actually changed
+  </Card>
+  
+  <Card title="Team-Friendly" icon="users">
+    Commit the lockfile for consistent builds across developers and CI
+  </Card>
+</CardGroup>
+
+## Use Cases
+
+llmake is perfect for:
+
+- **Documentation generation** - Keep README, API docs, and guides in sync with code
+- **Code generation** - Generate boilerplate, types, or derived code from source
+- **Content updates** - Maintain changelogs, migration guides, or release notes
+- **Multi-file transformations** - Any task where LLMs help keep files consistent
+
+<Tip>
+Because llmake is runner-agnostic, you can use different LLMs for different tasks. Use a powerful model for complex documentation and a faster model for simple updates.
+</Tip>
+
+## Quick Example
+
+Here's what a typical llmake workflow looks like:
+
+```bash
+# Initialize configuration
+llmake --init
+
+# Define a task in llmake.jsonc
+# Then run it
+llmake
+
+# Run a specific task
+llmake readme
+
+# Check what needs updating
+llmake --status
+```
+
+The configuration is declarative and simple:
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md based on the codebase",
+      "sources": ["src/**/*.ts"],
+      "exclude": ["src/**/*.test.ts"]
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install llmake globally or run it without installing
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get from zero to your first successful llmake run
+  </Card>
+</CardGroup>

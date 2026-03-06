@@ -1,0 +1,344 @@
+---
+title: Commands
+description: Complete reference for all llmake commands and usage patterns
+---
+
+llmake provides a simple command-line interface with multiple execution modes. All commands operate on tasks defined in your configuration file.
+
+## Command Patterns
+
+### Run All Tasks
+
+```bash
+llmake
+```
+
+Runs all tasks that have detected changes since the last run. llmake compares SHA-256 hashes of source files against `.llmake.lock` to determine which tasks need to run.
+
+**Example output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — 2 files changed (src/index.ts, src/config.ts)
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: readme — done (4.2s)
+llmake: api-docs — no changes
+llmake: changelog — no changes
+```
+
+<Note>
+Tasks with no changes are automatically skipped. Use `--force` to run them anyway.
+</Note>
+
+### Run Specific Task
+
+```bash
+llmake <task>
+```
+
+Runs a single named task if it has changes. The task name must match a key in your `tasks` configuration.
+
+**Example:**
+
+```bash
+llmake readme
+```
+
+**Output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — 1 files changed (src/index.ts)
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: readme — done (3.8s)
+```
+
+If the task hasn't changed:
+
+```bash
+llmake readme
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — no changes
+```
+
+<Note>
+If you specify a task name that doesn't exist in your configuration, llmake will exit with code 1 and display an error message.
+</Note>
+
+## Positional Arguments
+
+llmake accepts one optional positional argument:
+
+<ParamField path="task" type="string" optional>
+  The name of a specific task to run. Must match a key in the `tasks` object of your configuration file. If omitted, all tasks are processed.
+</ParamField>
+
+**Valid examples:**
+
+```bash
+llmake              # Run all tasks
+llmake readme       # Run "readme" task
+llmake api-docs     # Run "api-docs" task
+```
+
+**Invalid examples:**
+
+```bash
+llmake task1 task2  # Error: only one positional argument allowed
+llmake unknown      # Error: task "unknown" not found in config
+```
+
+## Command Modes
+
+llmake supports several execution modes controlled by flags. These can be combined with task names.
+
+### Force Mode
+
+```bash
+llmake --force [task]
+llmake -f [task]
+```
+
+Runs task(s) regardless of hash state. Useful when you want to regenerate files even if source files haven't changed.
+
+**Examples:**
+
+```bash
+# Force all tasks to run
+llmake --force
+
+# Force specific task to run
+llmake --force readme
+llmake -f readme
+```
+
+**Output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — forced run
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: readme — done (3.5s)
+```
+
+### Dry Run Mode
+
+```bash
+llmake --dry-run [task]
+llmake -n [task]
+```
+
+Shows what would run without actually executing any tasks. The lockfile is not updated in this mode.
+
+**Examples:**
+
+```bash
+# Check what would run for all tasks
+llmake --dry-run
+llmake -n
+
+# Check what would run for specific task
+llmake --dry-run readme
+llmake -n readme
+```
+
+**Output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — would run: claude --allowed-tools Read,Write,Edit --print ...
+llmake: api-docs — no changes, would skip
+llmake: changelog — no changes, would skip
+```
+
+<Note>
+Dry run mode is safe to use in CI/CD pipelines to check if tasks are up to date without modifying any files.
+</Note>
+
+### Status Mode
+
+```bash
+llmake --status
+llmake -s
+```
+
+Shows per-task change status without running anything. Displays which tasks have pending changes and how many files changed.
+
+**Example:**
+
+```bash
+llmake --status
+```
+
+**Output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — changed (2 files)
+llmake: api-docs — up to date
+llmake: changelog — changed (5 files)
+```
+
+This is useful for:
+- Quick status checks in development
+- Pre-commit hooks to verify all tasks are up to date
+- CI checks to ensure generated files are current
+
+### Initialize Mode
+
+```bash
+llmake --init
+```
+
+Creates a starter `llmake.jsonc` configuration file in the current directory. If a config file already exists, this command exits with an error.
+
+**Output on success:**
+
+```bash
+llmake: created llmake.jsonc
+```
+
+**Generated config:**
+
+```jsonc
+{
+  // Default runner command - {prompt} will be replaced with the assembled prompt
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "example": {
+      "prompt": "Describe what this code does",
+      "sources": ["src/**/*.ts"]
+    }
+  }
+}
+```
+
+**Output if file exists:**
+
+```bash
+llmake: llmake.jsonc already exists
+# Exit code: 1
+```
+
+## Help and Version
+
+### Help Command
+
+```bash
+llmake --help
+llmake -h
+```
+
+Prints usage information and exits with code 0.
+
+**Output:**
+
+```
+llmake 0.1.1
+
+Usage:
+  llmake                     Run all tasks with changes
+  llmake <task>              Run specific task if changed
+  llmake --force [task]      Run regardless of hash state
+  llmake --dry-run [task]    Show what would run
+  llmake --status            Show per-task change status
+  llmake --init              Write starter llmake.jsonc
+  llmake --config <path>     Use specific config file
+  llmake --help              Print this help
+  llmake --version           Print version
+```
+
+### Version Command
+
+```bash
+llmake --version
+llmake -v
+```
+
+Prints the current version number and exits with code 0.
+
+**Output:**
+
+```
+0.1.1
+```
+
+## Combining Flags
+
+Some flags can be combined with task names and each other:
+
+<CodeGroup>
+
+```bash Force + Dry Run + Task
+# See what would run if you forced the readme task
+llmake --force --dry-run readme
+llmake -f -n readme
+```
+
+```bash Force + Task
+# Force run specific task
+llmake --force readme
+llmake -f readme
+```
+
+```bash Config + Task
+# Use custom config to run specific task
+llmake --config ./configs/prod.jsonc readme
+llmake -c ./configs/prod.jsonc readme
+```
+
+</CodeGroup>
+
+<Note>
+The `--status` and `--dry-run` flags prevent the lockfile from being updated. This makes them safe for checking state without side effects.
+</Note>
+
+## No File Matches
+
+If a task's glob patterns don't match any files, llmake will skip that task and display a message:
+
+```bash
+llmake: my-task — no files matched
+```
+
+This is not considered an error and won't cause a non-zero exit code.
+
+## Task Execution Details
+
+When a task runs, llmake displays detailed progress information:
+
+```bash
+# Change detection
+llmake: readme — 3 files changed (src/index.ts, src/config.ts, src/types.ts)
+
+# Command being executed
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+
+# Completion status
+llmake: readme — done (4.7s)
+```
+
+If more than 3 files changed, additional files are summarized:
+
+```bash
+llmake: readme — 12 files changed (src/index.ts, src/config.ts, src/types.ts, +9 more)
+```
+
+## Task Failure Handling
+
+If a runner command exits with a non-zero code, llmake will:
+
+1. Display an error message with the exit code and elapsed time
+2. Not update the lockfile entry for that task
+3. Continue processing remaining tasks (if running all tasks)
+4. Exit with code 1 after all tasks complete
+
+**Example output:**
+
+```bash
+llmake: readme — 2 files changed (src/index.ts, src/config.ts)
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: readme — failed (exit 2, 1.3s)
+```
+
+The failed task will be retried on the next run since the lockfile wasn't updated.

@@ -1,80 +1,324 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get from zero to your first successful llmake run in minutes
 ---
 
-## Get started in three steps
+This guide will walk you through creating your first llmake task and running it successfully.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before starting, make sure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- llmake installed (see [Installation](/installation))
+- An LLM CLI available in your PATH (e.g., `claude`, `llm`, `ollama`)
+- A project with some source files to work with
 
-### Step 2: Deploy your changes
+## Step-by-Step Guide
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Steps>
+  <Step title="Initialize Configuration">
+    Navigate to your project directory and create a starter configuration:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```bash
+    cd your-project
+    llmake --init
+    ```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    This creates `llmake.jsonc` with an example task:
 
-### Step 3: Go live
+    ```jsonc
+    {
+      // Default runner command - {prompt} will be replaced with the assembled prompt
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": {
+        "example": {
+          "prompt": "Describe what this code does",
+          "sources": ["src/**/*.ts"]
+        }
+      }
+    }
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <Info>
+    The `{prompt}` placeholder is required in your runner command. llmake will replace it with the assembled prompt for each task.
+    </Info>
+  </Step>
 
-## Next steps
+  <Step title="Configure Your Runner">
+    Edit `llmake.jsonc` to use your preferred LLM CLI. Here are common options:
 
-Now that you have your docs running, explore these key features:
+    <CodeGroup>
+
+    ```jsonc Claude Code
+    {
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": { /* ... */ }
+    }
+    ```
+
+    ```jsonc OpenAI via llm
+    {
+      "runner": "llm -m gpt-4o {prompt}",
+      "tasks": { /* ... */ }
+    }
+    ```
+
+    ```jsonc Anthropic via llm
+    {
+      "runner": "llm -m claude-3-opus {prompt}",
+      "tasks": { /* ... */ }
+    }
+    ```
+
+    ```jsonc Local Ollama
+    {
+      "runner": "ollama run llama3 {prompt}",
+      "tasks": { /* ... */ }
+    }
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Define Your First Task">
+    Replace the example task with something useful for your project. Here's a task that generates a README:
+
+    ```jsonc
+    {
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": {
+        "readme": {
+          "prompt": "Update README.md based on the current codebase. Include installation instructions, usage examples, and API reference. Keep it concise and well-structured.",
+          "sources": ["src/**/*.ts"],
+          "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
+        }
+      }
+    }
+    ```
+
+    <Tip>
+    Be specific in your prompts. Include exactly what you want the LLM to do, which files to update, and any style guidelines.
+    </Tip>
+  </Step>
+
+  <Step title="Run llmake">
+    Execute the task:
+
+    ```bash
+    llmake
+    ```
+
+    You'll see output like:
+
+    ```
+    llmake: loaded llmake.jsonc (1 tasks)
+    llmake: readme — 12 files changed (src/index.ts, src/config.ts, src/hash.ts, +9 more)
+    llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+    llmake: readme — done (8.3s)
+    ```
+
+    llmake has:
+    1. Discovered your config file
+    2. Found 12 source files matching `src/**/*.ts`
+    3. Computed hashes for all files
+    4. Assembled a prompt with your instruction and changed files
+    5. Executed your runner CLI
+    6. Saved the state to `.llmake.lock`
+
+    <Note>
+    The first run always processes all files since there's no lockfile yet. Subsequent runs will only trigger when sources change.
+    </Note>
+  </Step>
+
+  <Step title="Run Again (No Changes)">
+    Run the same command again:
+
+    ```bash
+    llmake
+    ```
+
+    This time you'll see:
+
+    ```
+    llmake: loaded llmake.jsonc (1 tasks)
+    llmake: readme — no changes
+    ```
+
+    llmake compared the current file hashes against `.llmake.lock`, found no changes, and skipped execution. This is the core value proposition: only regenerate when sources actually change.
+  </Step>
+
+  <Step title="Make a Change and Run">
+    Edit one of your source files, then run llmake again:
+
+    ```bash
+    llmake
+    ```
+
+    Output:
+
+    ```
+    llmake: loaded llmake.jsonc (1 tasks)
+    llmake: readme — 1 files changed (src/index.ts)
+    llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+    llmake: readme — done (6.1s)
+    ```
+
+    llmake detected the change and re-ran the task, updating the lockfile with new hashes.
+  </Step>
+</Steps>
+
+## Understanding the Output
+
+llmake provides clear feedback about what it's doing:
+
+| Message | Meaning |
+|---------|---------|
+| `loaded llmake.jsonc (N tasks)` | Found config file with N tasks |
+| `readme — no changes` | All source files unchanged, skipping |
+| `readme — 3 files changed (...)` | Detected changes in 3 files |
+| `readme — running: ...` | Executing runner command |
+| `readme — done (X.Xs)` | Task completed successfully in X.X seconds |
+| `readme — failed (exit N)` | Runner exited with non-zero code N |
+
+## Working with the Lockfile
+
+The `.llmake.lock` file tracks task state:
+
+```json
+{
+  "version": 1,
+  "tasks": {
+    "readme": {
+      "last_run": "2024-01-15T10:30:00.000Z",
+      "sources_hash": "sha256:abc123...",
+      "files": {
+        "src/index.ts": "sha256:def456...",
+        "src/config.ts": "sha256:789abc..."
+      }
+    }
+  }
+}
+```
+
+<Warning>
+**Commit this file to version control.** It enables:
+- Incremental builds in CI/CD
+- Consistent state across team members
+- Audit trail of when tasks last ran
+</Warning>
+
+## Common CLI Operations
+
+Now that you have a working task, here are common operations:
+
+<CodeGroup>
+
+```bash Run Specific Task
+# Only run the "readme" task
+llmake readme
+```
+
+```bash Check Status
+# See which tasks have changes
+llmake --status
+# Output:
+# readme — up to date
+# changelog — changed (3 files)
+```
+
+```bash Dry Run
+# See what would run without executing
+llmake --dry-run
+# Output:
+# readme — no changes, would skip
+# changelog — would run: claude --print ...
+```
+
+```bash Force Run
+# Run even if no changes detected
+llmake --force readme
+# Output:
+# readme — forced run
+# readme — running: ...
+```
+
+</CodeGroup>
+
+## Multiple Tasks
+
+You can define multiple tasks in one config file:
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md based on the codebase",
+      "sources": ["src/**/*.ts"],
+      "exclude": ["src/**/*.test.ts"]
+    },
+    "api-docs": {
+      "prompt": "Generate API documentation in docs/api.md",
+      "sources": ["src/index.ts", "src/types.ts"]
+    },
+    "changelog": {
+      "prompt": "Update CHANGELOG.md with recent changes",
+      "sources": ["src/**/*.ts", "package.json"],
+      "runner": "llm -m gpt-4o-mini {prompt}"  // Override runner for this task
+    }
+  }
+}
+```
+
+Run all tasks:
+
+```bash
+llmake
+```
+
+Or run them individually:
+
+```bash
+llmake readme
+llmake api-docs
+llmake changelog
+```
+
+<Tip>
+Tasks with different runners can use different LLMs. Use powerful models for complex docs and faster/cheaper models for simple updates.
+</Tip>
+
+## Prompt Assembly
+
+When llmake runs a task, it assembles an XML-formatted prompt:
+
+```xml
+<prompt>Update README.md based on the current codebase</prompt>
+<changed-files>src/index.ts, src/config.ts, src/hash.ts</changed-files>
+```
+
+This tells your LLM:
+- What to do (your prompt)
+- Which files changed (so it can focus on relevant updates)
+
+The assembled prompt is safely shell-escaped and substituted into your runner command's `{prompt}` placeholder.
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Learn about all configuration options and advanced features
+  </Card>
+  
+  <Card title="CLI Reference" icon="terminal" href="/cli/commands">
+    Explore all CLI flags and commands
+  </Card>
+  
+  <Card title="Runner Examples" icon="rocket" href="/guides/runner-examples">
+    See how to configure different LLM CLIs as runners
+  </Card>
+  
+  <Card title="Glob Patterns" icon="folder-tree" href="/guides/glob-patterns">
+    Master source file matching with glob patterns
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

@@ -1,0 +1,157 @@
+---
+title: Installation
+description: Install llmake globally or run it without installing using your preferred package manager
+---
+
+llmake can be installed globally via npm, bun, or pnpm, or run directly without installation using npx/bunx/pnpx.
+
+## Global Installation
+
+Install llmake globally to use the `llmake` command from anywhere:
+
+<CodeGroup>
+
+```bash npm
+npm i -g llmake
+```
+
+```bash bun
+bun add -g llmake
+```
+
+```bash pnpm
+pnpm add -g llmake
+```
+
+</CodeGroup>
+
+After installation, verify it works:
+
+```bash
+llmake --version
+# 0.1.1
+```
+
+## Run Without Installing
+
+If you prefer not to install globally, you can run llmake directly:
+
+<CodeGroup>
+
+```bash npx
+npx llmake
+```
+
+```bash bunx
+bunx llmake
+```
+
+```bash pnpx
+pnpx llmake
+```
+
+</CodeGroup>
+
+<Info>
+Running without installation is great for CI/CD pipelines or trying llmake before committing to a global install.
+</Info>
+
+## Building from Source
+
+For development or to use the latest unreleased features, you can build llmake from source:
+
+```bash
+# Clone the repository
+git clone https://github.com/CyrusNuevoDia/llmake
+cd llmake
+
+# Install dependencies
+bun install
+
+# Build standalone binary
+bun run build:bin
+# Creates bin/llmake
+```
+
+The compiled binary will be available at `bin/llmake` and can be moved to any location in your `PATH`.
+
+<Note>
+Building from source requires [Bun](https://bun.sh) to be installed on your system.
+</Note>
+
+## LLM Runner Prerequisites
+
+llmake itself doesn't include an LLM - it's runner-agnostic. You'll need to install at least one LLM CLI tool to use as a runner:
+
+<CardGroup cols={2}>
+  <Card title="Claude Code" icon="terminal">
+    ```bash
+    # Installation varies by platform
+    # See: anthropic.com/claude
+    ```
+  </Card>
+  
+  <Card title="llm CLI" icon="robot">
+    ```bash
+    pip install llm
+    # Configure with API keys
+    llm keys set openai
+    llm keys set anthropic
+    ```
+  </Card>
+  
+  <Card title="Ollama" icon="server">
+    ```bash
+    # Download from ollama.ai
+    # Pull a model
+    ollama pull llama3
+    ```
+  </Card>
+  
+  <Card title="Custom Script" icon="code">
+    Any CLI that accepts a prompt string can be used as a runner
+  </Card>
+</CardGroup>
+
+<Tip>
+You can configure different runners for different tasks. Use powerful models for complex work and faster models for simple updates.
+</Tip>
+
+## Verifying Installation
+
+Once installed, verify llmake can find your shell environment:
+
+```bash
+llmake --help
+```
+
+You should see the full help output:
+
+```
+llmake 0.1.1
+
+Usage:
+  llmake                     Run all tasks with changes
+  llmake <task>              Run specific task if changed
+  llmake --force [task]      Run regardless of hash state
+  llmake --dry-run [task]    Show what would run
+  llmake --status            Show per-task change status
+  llmake --init              Write starter llmake.jsonc
+  llmake --config <path>     Use specific config file
+  llmake --help              Print this help
+  llmake --version           Print version
+```
+
+## Shell Environment
+
+llmake runs commands in a login shell to ensure proper environment loading. This means your runner CLI needs to be available in your PATH as configured in your shell profile (`.zshrc`, `.bashrc`, etc.).
+
+<Warning>
+If llmake can't find your runner command, check that it's properly installed and available in your shell's PATH.
+</Warning>
+
+## Next Steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Now that llmake is installed, follow the quickstart guide to create your first task
+</Card>

@@ -1,0 +1,372 @@
+---
+title: Lockfile
+description: Understanding the .llmake.lock file and how it enables incremental builds
+---
+
+The `.llmake.lock` file is llmake's memory. It records the state of your last successful run, enabling incremental builds by tracking exactly which files were processed and when.
+
+## Structure
+
+The lockfile is a JSON file with a simple, versioned structure:
+
+```json
+{
+  "version": 1,
+  "tasks": {
+    "readme": {
+      "last_run": "2024-01-15T10:30:00.000Z",
+      "sources_hash": "sha256:abc123...",
+      "files": {
+        "src/index.ts": "sha256:def456...",
+        "src/config.ts": "sha256:789abc..."
+      }
+    }
+  }
+}
+```
+
+### Top Level
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | number | Lockfile format version (currently `1`) for future compatibility |
+| `tasks` | object | Map of task names to their lock entries |
+
+### Task Lock Entry
+
+Each task in the lockfile records:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `last_run` | string | ISO 8601 timestamp of when the task last completed successfully |
+| `sources_hash` | string | Merkle root hash of all source files (format: `sha256:<hex>`) |
+| `files` | object | Map of file paths to their individual content hashes |
+
+<Info>
+The lockfile is automatically created and updated by llmake. You never need to edit it manually.
+</Info>
+
+## TypeScript Types
+
+llmake defines these TypeScript interfaces for the lockfile structure:
+
+```typescript
+/**
+ * The .llmake.lock file shape.
+ * Tracks the state of generated files for incremental builds.
+ */
+export interface LlmakeLock {
+  /** Lock file format version for future compatibility. */
+  version: 1;
+  /** Map of task names to their lock entries. */
+  tasks: Record<string, TaskLockEntry>;
+}
+
+/**
+ * Lock entry for a single task.
+ * Records when the task was last run and the state of its source files.
+ */
+export interface TaskLockEntry {
+  /** ISO 8601 timestamp of when the task was last executed. */
+  last_run: string;
+  /** Combined hash of all source file contents in format "sha256:<hex>". */
+  sources_hash: string;
+  /** Map of file paths to their content hashes in format "sha256:<hex>". */
+  files: Record<string, string>;
+}
+```
+
+## Reading and Writing
+
+llmake provides functions to read and write the lockfile:
+
+```typescript
+/**
+ * Read the lockfile from disk.
+ * Returns an empty lock structure if the file doesn't exist.
+ */
+export async function readLock(lockPath: string): Promise<LlmakeLock> {
+  try {
+    const text = await readFile(lockPath, "utf-8");
+    return JSON.parse(text);
+  } catch {
+    return { version: 1, tasks: {} };
+  }
+}
+
+/**
+ * Write the lockfile to disk as formatted JSON with a trailing newline.
+ */
+export async function writeLock(
+  lockPath: string,
+  lock: LlmakeLock
+): Promise<void> {
+  await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+}
+```
+
+<Tip>
+The lockfile is written with pretty-printing (2-space indentation) and a trailing newline to play nicely with version control systems.
+</Tip>
+
+## How It Enables Incremental Builds
+
+The lockfile is the key to llmake's incremental build capability. Here's how it works:
+
+### 1. First Run
+
+When you run a task for the first time (or after deleting `.llmake.lock`):
+
+1. llmake hashes all source files matching the task's patterns
+2. Computes a Merkle root from all file hashes
+3. Runs the task (all files are considered "changed")
+4. On success, writes a lock entry with:
+   - Current timestamp in `last_run`
+   - Merkle root in `sources_hash`
+   - All file hashes in `files`
+
+### 2. Subsequent Runs
+
+On later runs, llmake:
+
+1. Reads the lockfile
+2. Hashes current source files
+3. Computes current Merkle root
+4. Compares against lockfile's `sources_hash`:
+   - **Match**: Skip the task (nothing changed)
+   - **Mismatch**: Compare individual file hashes to determine what changed
+
+### 3. After Successful Run
+
+If the task runs and succeeds:
+
+1. llmake updates the lock entry with new hashes
+2. Sets `last_run` to current timestamp
+3. Writes the updated lockfile to disk
+
+This creates a continuous feedback loop where each successful run records its state, enabling the next run to detect changes efficiently.
+
+## Change Detection Algorithm
+
+The `diffTask` function uses the lockfile to determine what changed:
+
+```typescript
+/**
+ * Diff current task state against the lockfile entry.
+ * Uses Merkle root for fast-path comparison, falls back to per-file diff.
+ */
+export function diffTask(
+  taskName: string,
+  currentFiles: Record<string, string>,
+  currentRoot: string,
+  lockEntry: TaskLockEntry | undefined
+): TaskDiff {
+  const allFiles = Object.keys(currentFiles);
+
+  // No lock entry → everything is new
+  if (!lockEntry) {
+    return {
+      task: taskName,
+      changed: true,
+      changed_files: allFiles,
+      removed_files: [],
+      all_files: allFiles,
+    };
+  }
+
+  // Quick check: Merkle root match → skip
+  if (lockEntry.sources_hash === currentRoot) {
+    return {
+      task: taskName,
+      changed: false,
+      changed_files: [],
+      removed_files: [],
+      all_files: allFiles,
+    };
+  }
+
+  // Slow path: per-file diff
+  const changed: string[] = [];
+  const removed: string[] = [];
+
+  for (const [path, hash] of Object.entries(currentFiles)) {
+    if (lockEntry.files[path] !== hash) {
+      changed.push(path);
+    }
+  }
+
+  for (const path of Object.keys(lockEntry.files)) {
+    if (!(path in currentFiles)) {
+      removed.push(path);
+    }
+  }
+
+  return {
+    task: taskName,
+    changed: changed.length > 0 || removed.length > 0,
+    changed_files: changed,
+    removed_files: removed,
+    all_files: allFiles,
+  };
+}
+```
+
+This algorithm efficiently handles three scenarios:
+
+<Accordion title="No Lock Entry (First Run)">
+All files are considered new. The task must run to establish a baseline.
+</Accordion>
+
+<Accordion title="Merkle Root Match (Fast Path)">
+Nothing has changed. Skip the task entirely without comparing individual files.
+</Accordion>
+
+<Accordion title="Merkle Root Mismatch (Slow Path)">
+Something changed. Compare each file hash to identify exactly what changed or was removed.
+</Accordion>
+
+## Why Commit the Lockfile
+
+**You should commit `.llmake.lock` to version control.** Here's why:
+
+<CardGroup cols={2}>
+  <Card title="Incremental CI Builds" icon="rocket">
+    CI can skip unchanged tasks instead of regenerating everything on each run
+  </Card>
+  <Card title="Team Consistency" icon="users">
+    Everyone on the team sees the same change detection behavior
+  </Card>
+  <Card title="Audit Trail" icon="clock">
+    The lockfile records when each task last ran, useful for debugging
+  </Card>
+  <Card title="Reproducible Builds" icon="repeat">
+    The lockfile ensures deterministic behavior across environments
+  </Card>
+</CardGroup>
+
+### Example: CI Optimization
+
+Without lockfile in version control:
+```bash
+# Every CI run starts with no lockfile
+# All tasks run from scratch every time
+# Wastes LLM API calls and CI time
+```
+
+With lockfile committed:
+```bash
+# CI pulls the lockfile from the repo
+# Only runs tasks where source files changed in the commits
+# Dramatically faster and cheaper
+```
+
+<Note>
+This is similar to how `package-lock.json` (npm), `yarn.lock` (Yarn), and `Cargo.lock` (Rust) work - they capture the state of your dependencies and should be committed for reproducibility.
+</Note>
+
+## When the Lockfile Is Updated
+
+llmake updates the lockfile in these situations:
+
+1. **Successful task run**: After a task completes successfully (exit code 0)
+2. **Per-task basis**: Only the specific task that ran is updated
+3. **Atomic write**: The entire lockfile is rewritten atomically
+
+The lockfile is **not updated** if:
+- The task exits with a non-zero code (failure)
+- You use `--dry-run` mode
+- You kill llmake before the task completes
+
+<Warning>
+If a task fails, llmake does not update its lock entry. This means the next run will attempt the task again, even if you haven't changed any files. This is intentional - it allows you to fix transient issues (like rate limits) and retry.
+</Warning>
+
+## Lockfile Conflicts
+
+Since the lockfile is committed to version control, you might encounter merge conflicts when:
+
+- Multiple branches run different tasks
+- Different developers run llmake concurrently
+- CI and local runs interleave
+
+### Resolving Conflicts
+
+Lockfile conflicts are usually safe to resolve by:
+
+1. **Accepting either side**: Both versions are typically valid
+2. **Running llmake**: After merging, run llmake to regenerate with current state
+3. **Force run if needed**: Use `llmake --force` to regenerate everything from scratch
+
+```bash
+# After resolving a lockfile conflict
+git merge feature-branch
+# Resolve .llmake.lock conflict (take either side)
+llmake --force  # Regenerate everything with fresh state
+```
+
+<Tip>
+Lockfile conflicts are rarely problematic because the lockfile is derived data. When in doubt, delete it and run `llmake --force` to rebuild from scratch.
+</Tip>
+
+## Lockfile Location
+
+llmake always creates `.llmake.lock` in the same directory where it finds your config file:
+
+```bash
+# Config at ./llmake.jsonc
+# Lockfile at ./.llmake.lock
+
+# Config at ./config/llmake.jsonc
+# Lockfile at ./config/.llmake.lock
+```
+
+<Info>
+If you use `--config` to specify a custom config path, the lockfile will be created alongside that config file.
+</Info>
+
+## Inspecting the Lockfile
+
+You can inspect the lockfile to see:
+
+- When each task last ran successfully
+- Which files were included in each task
+- The exact hash state of your last run
+
+```bash
+# Pretty-print the lockfile
+cat .llmake.lock | jq
+
+# See when a specific task last ran
+cat .llmake.lock | jq '.tasks.readme.last_run'
+
+# List all files in a task
+cat .llmake.lock | jq '.tasks.readme.files | keys'
+```
+
+## Lockfile and `--status`
+
+The `--status` flag uses the lockfile to show you which tasks have pending changes:
+
+```bash
+llmake --status
+```
+
+This compares current file hashes against the lockfile and reports:
+- Tasks with changes (would run)
+- Tasks without changes (would skip)
+- Tasks never run before
+
+<Note>
+`--status` is a read-only operation - it never modifies the lockfile or runs any tasks.
+</Note>
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Content Addressing" icon="fingerprint" href="/concepts/content-addressing">
+    Learn how file hashes are computed and compared
+  </Card>
+  <Card title="Prompt Assembly" icon="layer-group" href="/concepts/prompt-assembly">
+    See how changed files from the lockfile diff are communicated to the LLM
+  </Card>
+</CardGroup>

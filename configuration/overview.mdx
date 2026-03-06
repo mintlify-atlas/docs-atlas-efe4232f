@@ -1,0 +1,128 @@
+---
+title: Configuration Overview
+description: Learn how llmake discovers and validates configuration files
+---
+
+llmake uses configuration files to define your build tasks and runner commands. Configuration files are automatically discovered in your project directory and support multiple formats for flexibility.
+
+## Config File Discovery
+
+llmake searches for configuration files in the following priority order:
+
+<CodeGroup>
+```typescript src/config.ts
+const CONFIG_FILES = [
+  "llmake.ts",
+  "llmake.jsonc",
+  "llmake.json",
+  "llmake.toml",
+] as const;
+```
+</CodeGroup>
+
+When you run `llmake`, it will:
+
+1. Start in your current working directory (or the directory specified with `--config`)
+2. Check for each config file in order
+3. Use the **first** file it finds
+4. Stop searching once a valid config is found
+
+<Note>
+If you have multiple config files in the same directory, only the first one in priority order will be used. TypeScript configs (`llmake.ts`) take highest priority.
+</Note>
+
+## Required Fields
+
+Every llmake configuration must include two top-level fields:
+
+<ParamField path="runner" type="string" required>
+  The default command to execute for code generation tasks. Must contain the `{prompt}` placeholder which will be replaced with the assembled prompt at runtime.
+  
+  **Validation**: Must not be empty and must include `{prompt}`.
+</ParamField>
+
+<ParamField path="tasks" type="Record<string, TaskConfig>" required>
+  A map of task names to their configurations. Each task defines what files to process and what prompt to use.
+  
+  **Validation**: Must contain at least one task.
+</ParamField>
+
+<CodeGroup>
+```typescript src/config.ts
+const LlmakeConfigSchema = z
+  .object({
+    runner: z
+      .string()
+      .min(1, "runner must not be empty")
+      .refine(
+        (s) => s.includes("{prompt}"),
+        "runner must contain {prompt} placeholder"
+      ),
+    tasks: z
+      .record(z.string(), TaskConfigSchema)
+      .refine((t) => Object.keys(t).length > 0, "tasks must not be empty"),
+  })
+  .passthrough();
+```
+</CodeGroup>
+
+## Configuration Structure
+
+A minimal configuration looks like this:
+
+```jsonc
+{
+  "runner": "claude --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md based on the codebase.",
+      "sources": ["src/**/*.ts"]
+    }
+  }
+}
+```
+
+## Validation
+
+llmake validates your configuration using [Zod](https://zod.dev/) schemas to ensure:
+
+- The `runner` field contains the required `{prompt}` placeholder
+- All tasks have non-empty prompts and source arrays
+- Task-level runner overrides (if present) also contain `{prompt}`
+- All required fields are present
+
+<CodeGroup>
+```typescript src/config.ts
+export function validateConfig(raw: unknown): LlmakeConfig {
+  const result = LlmakeConfigSchema.safeParse(raw);
+
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    const path = issue.path.length > 0 ? ` in "${issue.path.join(".")}"` : "";
+    throw new Error(`llmake: config error${path}: ${issue.message}`);
+  }
+
+  return result.data;
+}
+```
+</CodeGroup>
+
+If validation fails, you'll see a clear error message indicating what went wrong:
+
+```bash
+llmake: config error in "runner": runner must contain {prompt} placeholder
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Config Formats" icon="file-code" href="/configuration/config-formats">
+    Learn about all supported config formats including TypeScript, JSONC, JSON, and TOML
+  </Card>
+  <Card title="Tasks" icon="list-check" href="/configuration/tasks">
+    Understand task configuration options and how to define code generation tasks
+  </Card>
+  <Card title="Runners" icon="terminal" href="/configuration/runners">
+    Discover how runners work and how to configure different LLM providers
+  </Card>
+</CardGroup>

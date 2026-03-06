@@ -1,0 +1,410 @@
+---
+title: Flags
+description: Complete reference for all llmake command-line flags and options
+---
+
+llmake supports several flags to control execution behavior. Most flags have both long and short forms.
+
+## Boolean Flags
+
+### --help, -h
+
+<ParamField path="--help" type="boolean" default="false">
+  Prints usage information and exits with code 0. No tasks are executed and no configuration file is loaded.
+</ParamField>
+
+**Usage:**
+
+```bash
+llmake --help
+llmake -h
+```
+
+**Output:**
+
+```
+llmake 0.1.1
+
+Usage:
+  llmake                     Run all tasks with changes
+  llmake <task>              Run specific task if changed
+  llmake --force [task]      Run regardless of hash state
+  llmake --dry-run [task]    Show what would run
+  llmake --status            Show per-task change status
+  llmake --init              Write starter llmake.jsonc
+  llmake --config <path>     Use specific config file
+  llmake --help              Print this help
+  llmake --version           Print version
+```
+
+### --version, -v
+
+<ParamField path="--version" type="boolean" default="false">
+  Prints the current version number and exits with code 0. No tasks are executed.
+</ParamField>
+
+**Usage:**
+
+```bash
+llmake --version
+llmake -v
+```
+
+**Output:**
+
+```
+0.1.1
+```
+
+### --force, -f
+
+<ParamField path="--force" type="boolean" default="false">
+  Runs task(s) regardless of hash state. Bypasses the change detection mechanism and forces execution even if source files haven't changed since the last run.
+</ParamField>
+
+**Usage:**
+
+```bash
+# Force all tasks to run
+llmake --force
+llmake -f
+
+# Force specific task to run
+llmake --force readme
+llmake -f readme
+```
+
+**Behavior:**
+
+- Tasks marked as "up to date" will still execute
+- Lockfile entries are updated after successful runs
+- Useful for:
+  - Regenerating files after changing prompts
+  - Fixing corrupted generated files
+  - Testing runner commands
+  - Forcing a rebuild in CI
+
+**Example output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — forced run
+llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: readme — done (3.5s)
+llmake: api-docs — forced run
+llmake: api-docs — running: claude --allowed-tools Read,Write,Edit --print ...
+llmake: api-docs — done (2.8s)
+```
+
+<Note>
+Using `--force` does not skip hash computation. Hashes are still calculated and stored in the lockfile for future incremental runs.
+</Note>
+
+### --dry-run, -n
+
+<ParamField path="--dry-run" type="boolean" default="false">
+  Shows what would run without actually executing any tasks. No runner commands are invoked and the lockfile is not modified.
+</ParamField>
+
+**Usage:**
+
+```bash
+# Dry run all tasks
+llmake --dry-run
+llmake -n
+
+# Dry run specific task
+llmake --dry-run readme
+llmake -n readme
+```
+
+**Behavior:**
+
+- Loads configuration and computes file hashes
+- Shows which tasks would run based on changes
+- Displays the runner command that would be executed
+- Does not invoke any runner commands
+- Does not update `.llmake.lock`
+
+**Example output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — would run: claude --allowed-tools Read,Write,Edit --print ...
+llmake: api-docs — no changes, would skip
+llmake: changelog — would run: llm -m gpt-4o ...
+```
+
+**Combined with --force:**
+
+```bash
+llmake --force --dry-run
+llmake -f -n
+```
+
+Shows what would run if all tasks were forced:
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — would run: claude --allowed-tools Read,Write,Edit --print ...
+llmake: api-docs — would run: claude --allowed-tools Read,Write,Edit --print ...
+llmake: changelog — would run: llm -m gpt-4o ...
+```
+
+<Note>
+Dry run mode is safe for CI/CD pipelines. It allows you to check task status without modifying any files or executing potentially long-running LLM calls.
+</Note>
+
+### --status, -s
+
+<ParamField path="--status" type="boolean" default="false">
+  Shows per-task change status without running anything. Displays which tasks have pending changes and how many files were modified.
+</ParamField>
+
+**Usage:**
+
+```bash
+llmake --status
+llmake -s
+```
+
+**Behavior:**
+
+- Loads configuration and computes file hashes
+- Compares against `.llmake.lock` to detect changes
+- Displays status for each task
+- Does not run any tasks
+- Does not update the lockfile
+
+**Example output:**
+
+```bash
+llmake: loaded llmake.jsonc (3 tasks)
+llmake: readme — changed (2 files)
+llmake: api-docs — up to date
+llmake: changelog — changed (5 files)
+```
+
+**Use cases:**
+
+- Quick status check during development
+- Pre-commit hook to verify all generated files are current
+- CI verification that docs are up to date
+- Monitoring which tasks need attention
+
+### --init
+
+<ParamField path="--init" type="boolean" default="false">
+  Creates a starter `llmake.jsonc` configuration file in the current directory. If a configuration file already exists, exits with an error.
+</ParamField>
+
+**Usage:**
+
+```bash
+llmake --init
+```
+
+**Behavior:**
+
+- Creates `llmake.jsonc` in the current directory
+- Uses a predefined template with an example task
+- Exits with code 0 on success
+- Exits with code 1 if `llmake.jsonc` already exists
+
+**Success output:**
+
+```bash
+llmake: created llmake.jsonc
+```
+
+**Generated file:**
+
+```jsonc
+{
+  // Default runner command - {prompt} will be replaced with the assembled prompt
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "example": {
+      "prompt": "Describe what this code does",
+      "sources": ["src/**/*.ts"]
+    }
+  }
+}
+```
+
+**Error if file exists:**
+
+```bash
+llmake: llmake.jsonc already exists
+# Exit code: 1
+```
+
+<Note>
+The `--init` flag only creates `llmake.jsonc`. If you prefer a different format (JSON, TOML, or TypeScript), create the file manually or rename the generated file.
+</Note>
+
+## String Flags
+
+### --config, -c
+
+<ParamField path="--config" type="string" optional>
+  Specifies a custom configuration file path instead of using auto-discovery. The path can be relative or absolute.
+</ParamField>
+
+**Usage:**
+
+```bash
+# Relative path
+llmake --config ./configs/prod.jsonc
+llmake -c ./configs/prod.jsonc
+
+# Absolute path
+llmake --config /home/user/project/llmake.jsonc
+llmake -c /home/user/project/llmake.jsonc
+```
+
+**Behavior:**
+
+- Bypasses the default config discovery process
+- Path is resolved relative to the current working directory
+- If the file doesn't exist, exits with code 2
+- If the file exists but is invalid, exits with code 1
+
+**Default discovery order (without --config):**
+
+1. `llmake.ts`
+2. `llmake.jsonc`
+3. `llmake.json`
+4. `llmake.toml`
+
+**Example output:**
+
+```bash
+llmake --config ./configs/prod.jsonc
+llmake: loaded prod.jsonc (5 tasks)
+llmake: readme — no changes
+llmake: api-docs — no changes
+```
+
+**Use cases:**
+
+- Multiple environments (dev, staging, prod)
+- Different task sets for different contexts
+- Testing new configurations without replacing the main one
+- Per-branch configurations in CI
+
+**Example CI workflow:**
+
+```yaml
+- name: Check docs are up to date
+  run: llmake --config .github/llmake-ci.jsonc --status
+```
+
+## Flag Combinations
+
+Certain flags can be combined to create powerful workflows:
+
+<CodeGroup>
+
+```bash Force + Dry Run
+# Preview what would run if forced
+llmake --force --dry-run
+llmake -f -n
+```
+
+```bash Config + Status
+# Check status using custom config
+llmake --config ./prod.jsonc --status
+llmake -c ./prod.jsonc -s
+```
+
+```bash Config + Task
+# Run specific task with custom config
+llmake --config ./prod.jsonc readme
+llmake -c ./prod.jsonc readme
+```
+
+```bash Force + Task
+# Force specific task to run
+llmake --force readme
+llmake -f readme
+```
+
+</CodeGroup>
+
+## Mutually Exclusive Flags
+
+Some flags exit early or change execution mode fundamentally:
+
+- `--help`, `--version`, and `--init` exit immediately without processing tasks
+- `--status` and `--dry-run` both prevent execution (use one or the other)
+- Using `--status` with `--dry-run` results in status mode behavior
+
+## Flag Parsing
+
+llmake uses Node.js's built-in `parseArgs` utility with strict mode enabled:
+
+- Unknown flags cause an error and exit with code 1
+- Flag order doesn't matter
+- Short forms can be combined: `-fns` is equivalent to `-f -n -s`
+- Values for string flags can use `=` or space: `--config=file.json` or `--config file.json`
+
+**Error examples:**
+
+```bash
+# Unknown flag
+llmake --unknown
+llmake: Unknown option '--unknown'
+# Exit code: 1
+
+# Invalid combination
+llmake task1 task2
+llmake: Only one task name is allowed
+# Exit code: 1
+```
+
+## Environment Variables
+
+llmake does not currently support environment variables for configuration. All settings must be provided via flags or configuration files.
+
+Runner commands are executed in a login shell (`-l -i -c`), which means they inherit your full shell environment including:
+
+- `PATH` from `.zshrc` or `.bashrc`
+- Environment variables defined in shell config
+- Aliases and functions (though these may not work in non-interactive contexts)
+
+## Shell Completion
+
+llmake does not currently ship with shell completion scripts. You can create custom completions for your shell:
+
+**Bash example:**
+
+```bash
+# ~/.bashrc or ~/.bash_profile
+_llmake_completions() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  local flags="--help --version --force --dry-run --status --init --config"
+  
+  if [[ ${cur} == -* ]]; then
+    COMPREPLY=( $(compgen -W "${flags}" -- ${cur}) )
+  fi
+}
+
+complete -F _llmake_completions llmake
+```
+
+## Exit Behavior
+
+Different flags affect the exit code:
+
+| Flag | Success Exit | Failure Exit |
+|------|--------------|--------------|
+| `--help` | 0 | N/A |
+| `--version` | 0 | N/A |
+| `--init` | 0 | 1 (if file exists) |
+| `--status` | 0 | 1 (on error) |
+| `--dry-run` | 0 | 1 (on error) |
+| `--force` | 0 (all succeed) | 1 (any fail) |
+| `--config` | Depends on tasks | 1 or 2 (if invalid) |
+
+See [Exit Codes](/cli/exit-codes) for complete exit code reference.

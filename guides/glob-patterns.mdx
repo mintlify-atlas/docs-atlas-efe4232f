@@ -1,0 +1,255 @@
+---
+title: "Glob Patterns"
+description: "Understanding glob patterns for source file matching in llmake"
+---
+
+Glob patterns allow you to specify which files llmake should track for each task. When source files matching your patterns change, llmake knows to regenerate the corresponding outputs.
+
+## Pattern Syntax
+
+llmake uses standard glob syntax for matching files. Here are the most common patterns:
+
+| Pattern | Matches | Example |
+|---------|---------|---------|
+| `src/**/*.ts` | All `.ts` files in `src/` recursively | `src/index.ts`, `src/lib/utils.ts`, `src/lib/deep/nested.ts` |
+| `*.md` | All `.md` files in root | `README.md`, `CHANGELOG.md` |
+| `src/*.ts` | `.ts` files directly in `src/` (not nested) | `src/index.ts`, but not `src/lib/utils.ts` |
+| `{src,lib}/**/*.ts` | `.ts` files in both `src/` and `lib/` | `src/index.ts`, `lib/helper.ts` |
+
+<Note>
+Glob patterns are resolved relative to the directory where your `llmake.jsonc` config file lives.
+</Note>
+
+## Common Patterns
+
+### All TypeScript Files
+
+```jsonc
+{
+  "sources": ["src/**/*.ts"]
+}
+```
+
+This recursively matches all `.ts` files within the `src/` directory and all subdirectories.
+
+### Multiple File Types
+
+```jsonc
+{
+  "sources": ["src/**/*.{ts,js,tsx,jsx}"]
+}
+```
+
+Use brace expansion `{...}` to match multiple file extensions.
+
+### Multiple Directories
+
+```jsonc
+{
+  "sources": [
+    "src/**/*.ts",
+    "lib/**/*.ts",
+    "types/**/*.ts"
+  ]
+}
+```
+
+You can provide multiple glob patterns as an array. All matching files will be tracked.
+
+### Root-Level Files Only
+
+```jsonc
+{
+  "sources": ["*.md", "package.json"]
+}
+```
+
+Patterns without `/` or `**` match files in the root directory only.
+
+## Exclude Patterns
+
+The `exclude` field allows you to filter out files from your `sources` patterns. This is essential for ignoring test files, build artifacts, or other files you don't want to track.
+
+### Basic Exclusion
+
+```jsonc
+{
+  "sources": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+This matches all `.ts` files except those ending in `.test.ts`.
+
+### Multiple Exclusions
+
+```jsonc
+{
+  "sources": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/__tests__/**"
+  ]
+}
+```
+
+Exclude test files, spec files, and entire test directories.
+
+### Excluding Build Artifacts
+
+```jsonc
+{
+  "sources": ["**/*.ts"],
+  "exclude": [
+    "dist/**",
+    "build/**",
+    "node_modules/**",
+    "**/*.d.ts"
+  ]
+}
+```
+
+<Tip>
+Common files to exclude: build outputs, dependency directories, type declarations, and generated files.
+</Tip>
+
+## Real-World Examples
+
+### Documentation Task
+
+Track all source code but exclude tests and build outputs:
+
+```jsonc
+{
+  "readme": {
+    "prompt": "Update README.md based on the current codebase",
+    "sources": ["src/**/*.ts"],
+    "exclude": [
+      "src/**/*.test.ts",
+      "src/**/*.spec.ts"
+    ]
+  }
+}
+```
+
+### API Documentation
+
+Only track public API files:
+
+```jsonc
+{
+  "api-docs": {
+    "prompt": "Generate API documentation for the public exports",
+    "sources": [
+      "src/index.ts",
+      "src/types.ts"
+    ]
+  }
+}
+```
+
+### Changelog Generation
+
+Track source code and package metadata:
+
+```jsonc
+{
+  "changelog": {
+    "prompt": "Update CHANGELOG.md with recent changes",
+    "sources": [
+      "src/**/*.ts",
+      "package.json"
+    ]
+  }
+}
+```
+
+### Multi-Language Project
+
+Track both frontend and backend code:
+
+```jsonc
+{
+  "full-docs": {
+    "prompt": "Generate comprehensive project documentation",
+    "sources": [
+      "src/**/*.ts",
+      "web/**/*.tsx",
+      "api/**/*.go",
+      "*.md"
+    ],
+    "exclude": [
+      "**/*.test.*",
+      "**/__tests__/**",
+      "**/__mocks__/**"
+    ]
+  }
+}
+```
+
+## How Patterns Are Resolved
+
+llmake uses the [fast-glob](https://github.com/mrmlnc/fast-glob) library to resolve patterns. Here's what happens when you run a task:
+
+<Steps>
+  <Step title="Match sources">
+    All patterns in the `sources` array are expanded to match files on disk
+  </Step>
+  <Step title="Apply exclusions">
+    Files matching any pattern in the `exclude` array are removed from the set
+  </Step>
+  <Step title="Deduplicate">
+    If the same file matches multiple patterns, it only appears once
+  </Step>
+  <Step title="Sort">
+    The final list is sorted lexicographically for consistent hashing
+  </Step>
+</Steps>
+
+From `src/hash.ts:42`:
+
+```typescript
+export async function resolveFiles(
+  sources: string[],
+  exclude: string[] = []
+): Promise<string[]> {
+  const files = await fg(sources, {
+    cwd: process.cwd(),
+    dot: false,
+    ignore: exclude,
+  });
+  return [...new Set(files)].sort();
+}
+```
+
+<Note>
+Dotfiles (files starting with `.`) are ignored by default. This prevents accidentally tracking files like `.env` or `.git/` contents.
+</Note>
+
+## Testing Your Patterns
+
+Use `--dry-run` to see which files match your patterns without actually running tasks:
+
+```bash
+llmake --dry-run
+```
+
+This shows you exactly which files will be tracked for each task, helping you verify your glob patterns are correct.
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Be Specific" icon="bullseye">
+    Use precise patterns to avoid tracking unnecessary files. This keeps hashing fast and prevents spurious regenerations.
+  </Card>
+  <Card title="Exclude Tests" icon="flask">
+    Test files rarely need to trigger documentation or generated code updates. Exclude them with `**/*.test.*` patterns.
+  </Card>
+  <Card title="Use Exclude Over Negative Patterns" icon="filter">
+    The `exclude` field is clearer than trying to write complex negative glob patterns.
+  </Card>
+  <Card title="Track Metadata Files" icon="file-code">
+    Don't forget to track `package.json`, `tsconfig.json`, or other config files that might affect your generated outputs.
+  </Card>
+</CardGroup>

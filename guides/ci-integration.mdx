@@ -1,0 +1,508 @@
+---
+title: "CI/CD Integration"
+description: "Run llmake in continuous integration pipelines for automated generation"
+---
+
+llmake is designed to work seamlessly in CI/CD environments. By committing `.llmake.lock`, you enable incremental builds that only regenerate files when their sources actually change.
+
+## Why Run llmake in CI?
+
+<CardGroup cols={2}>
+  <Card title="Catch Stale Files" icon="alert">
+    Fail CI if generated files are out of sync with sources
+  </Card>
+  <Card title="Automated Updates" icon="robot">
+    Automatically regenerate docs, types, or other derived files
+  </Card>
+  <Card title="Enforce Consistency" icon="check">
+    Ensure the entire team uses the same generation process
+  </Card>
+  <Card title="PR Previews" icon="eye">
+    Generate updated documentation for every pull request
+  </Card>
+</CardGroup>
+
+## The Lockfile
+
+`.llmake.lock` tracks the state of your last successful generation:
+
+```json
+{
+  "version": 1,
+  "tasks": {
+    "readme": {
+      "last_run": "2024-01-15T10:30:00.000Z",
+      "sources_hash": "sha256:abc123...",
+      "files": {
+        "src/index.ts": "sha256:def456...",
+        "src/config.ts": "sha256:789abc..."
+      }
+    }
+  }
+}
+```
+
+<Note>
+**Always commit `.llmake.lock` to version control.** This is essential for incremental builds in CI and consistency across your team.
+</Note>
+
+### What the Lockfile Enables
+
+- **Incremental builds**: CI only runs tasks when source files actually changed
+- **Team consistency**: Everyone sees the same "needs update" status
+- **Audit trail**: Track when each task was last run
+- **Fast CI**: Skip regeneration when nothing changed
+
+## Exit Codes
+
+llmake uses standard exit codes to integrate with CI systems:
+
+| Code | Meaning | CI Impact |
+|------|---------|-----------|
+| `0` | Success (all tasks completed or skipped) | CI passes ✅ |
+| `1` | Task execution failed or invalid arguments | CI fails ❌ |
+| `2` | No config file found | CI fails ❌ |
+
+From the README:
+
+> ### Exit Codes
+>
+> | Code | Meaning |
+> |------|---------|
+> | 0 | Success (all tasks completed or skipped) |
+> | 1 | Task execution failed or invalid arguments |
+> | 2 | No config file found |
+
+Use these codes in CI scripts to control pipeline behavior:
+
+```bash
+# Run llmake and fail the build if it fails
+llmake || exit 1
+
+# Or let bash handle it automatically with -e
+set -e
+llmake
+```
+
+## Verification Mode (Check for Staleness)
+
+Run llmake with `--dry-run` to check if files need regeneration without actually running tasks:
+
+```bash
+llmake --dry-run
+```
+
+If any tasks would run, llmake exits with code `1`. This is perfect for CI checks:
+
+```yaml
+# Fail if generated files are stale
+- name: Check for stale generated files
+  run: |
+    llmake --dry-run
+    if [ $? -eq 1 ]; then
+      echo "❌ Generated files are out of sync. Run 'llmake' locally and commit the changes."
+      exit 1
+    fi
+```
+
+## Force Regeneration
+
+Use `--force` to regenerate everything regardless of the lockfile:
+
+```bash
+llmake --force
+```
+
+This is useful for:
+- Scheduled regeneration (nightly builds)
+- After changing the prompt or runner config
+- One-time fixes when the lockfile gets out of sync
+
+```yaml
+# Regenerate all docs every night
+- name: Regenerate documentation
+  run: llmake --force
+  if: github.event.schedule == 'nightly'
+```
+
+## GitHub Actions Examples
+
+### Basic: Verify Files Are Up to Date
+
+Fail the build if someone forgot to run llmake:
+
+```yaml
+name: Verify Generated Files
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install llmake
+        run: npm install -g llmake
+      
+      - name: Check for stale files
+        run: |
+          llmake --dry-run
+          if [ $? -eq 1 ]; then
+            echo "::error::Generated files are out of sync"
+            echo "Run 'llmake' locally and commit the updated files"
+            exit 1
+          fi
+```
+
+### Auto-Regenerate and Commit
+
+Automatically update generated files and commit them:
+
+```yaml
+name: Auto-Update Generated Files
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install llmake
+        run: npm install -g llmake
+      
+      - name: Set up Claude Code
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude auth --api-key ${{ secrets.ANTHROPIC_API_KEY }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      
+      - name: Run llmake
+        run: llmake
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --quiet && git diff --staged --quiet || \
+            git commit -m "chore: update generated files [skip ci]"
+          git push
+```
+
+<Tip>
+Add `[skip ci]` to the commit message to prevent infinite loops if your CI runs on every commit.
+</Tip>
+
+### PR Preview: Generate Docs on Every PR
+
+```yaml
+name: Preview Generated Docs
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'llmake.jsonc'
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install llmake
+        run: npm install -g llmake
+      
+      - name: Generate preview
+        run: llmake --force
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      
+      - name: Upload preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-docs
+          path: |
+            README.md
+            docs/**
+```
+
+## GitLab CI Examples
+
+### Verification Job
+
+```yaml
+# .gitlab-ci.yml
+verify-generated:
+  image: node:20
+  stage: test
+  script:
+    - npm ci
+    - npm install -g llmake
+    - llmake --dry-run
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+```
+
+### Auto-Update on Main
+
+```yaml
+# .gitlab-ci.yml
+regenerate:
+  image: node:20
+  stage: deploy
+  before_script:
+    - npm ci
+    - npm install -g llmake
+    - 'command -v claude || npm install -g @anthropic-ai/claude-code'
+    - claude auth --api-key ${ANTHROPIC_API_KEY}
+  script:
+    - llmake
+    - |
+      if [ -n "$(git status --porcelain)" ]; then
+        git config user.name "GitLab CI"
+        git config user.email "ci@gitlab.com"
+        git add -A
+        git commit -m "chore: update generated files [skip ci]"
+        git push https://oauth2:${CI_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git HEAD:${CI_COMMIT_REF_NAME}
+      fi
+  only:
+    - main
+  variables:
+    GIT_STRATEGY: clone
+```
+
+## Handling API Keys
+
+llmake runners often need API keys for LLM providers. Store these as secrets:
+
+### GitHub Actions
+
+1. Go to repository **Settings** → **Secrets and variables** → **Actions**
+2. Add secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.
+3. Reference in workflow:
+
+```yaml
+- name: Run llmake
+  run: llmake
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### GitLab CI
+
+1. Go to project **Settings** → **CI/CD** → **Variables**
+2. Add variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.
+3. Mark them as **Protected** and **Masked**
+4. Reference in `.gitlab-ci.yml`:
+
+```yaml
+variables:
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+```
+
+<Note>
+Never commit API keys to your repository. Always use CI secrets or environment variables.
+</Note>
+
+## Using Local Models in CI
+
+For privacy or cost reasons, you might want to use local models via Ollama in CI:
+
+```yaml
+name: Generate with Local LLM
+
+on: [push]
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.ai/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull llama3
+      
+      - name: Install llmake
+        run: npm install -g llmake
+      
+      - name: Run llmake
+        run: llmake
+```
+
+<Tip>
+Local models in CI require runners with sufficient RAM (8GB+ for most models). Consider using self-hosted runners or GitHub's larger runners.
+</Tip>
+
+## Caching for Faster Builds
+
+Cache your `node_modules` and `.llmake.lock` to speed up CI:
+
+```yaml
+- name: Cache dependencies
+  uses: actions/cache@v4
+  with:
+    path: |
+      node_modules
+      ~/.npm
+    key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+    restore-keys: |
+      ${{ runner.os }}-node-
+```
+
+<Note>
+`.llmake.lock` should be committed, not cached. Caching is for dependencies only.
+</Note>
+
+## Common CI Patterns
+
+### Pattern 1: Strict Verification
+
+Fail CI if anyone commits code without running llmake:
+
+```bash
+llmake --dry-run
+```
+
+**Use when:** You want to enforce that generated files are always in sync.
+
+### Pattern 2: Auto-Fix on Push
+
+Automatically regenerate and commit:
+
+```bash
+llmake
+git add -A
+git commit -m "chore: auto-update generated files"
+git push
+```
+
+**Use when:** You trust the LLM to make good changes and want frictionless updates.
+
+### Pattern 3: Scheduled Regeneration
+
+Use `--force` on a schedule (nightly, weekly):
+
+```yaml
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday at midnight
+
+jobs:
+  regenerate:
+    steps:
+      - run: llmake --force
+```
+
+**Use when:** Your prompts evolve or you want to take advantage of improved LLM capabilities over time.
+
+## Troubleshooting CI Failures
+
+### "Command not found: claude"
+
+Your runner isn't in PATH. Install it first:
+
+```yaml
+- name: Install Claude Code
+  run: npm install -g @anthropic-ai/claude-code
+```
+
+### "API key not found"
+
+Set environment variables from CI secrets:
+
+```yaml
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+### "Permission denied"
+
+The CI user can't push commits. Use a token with write permissions:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+For protected branches, use a personal access token instead of `GITHUB_TOKEN`.
+
+### Tasks Running When They Shouldn't
+
+Ensure `.llmake.lock` is committed and up to date:
+
+```bash
+git add .llmake.lock
+git commit -m "chore: update lockfile"
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Commit the lockfile">
+    Always commit `.llmake.lock` so CI can do incremental builds
+  </Step>
+  <Step title="Use --dry-run for verification">
+    Check staleness without running expensive LLM calls
+  </Step>
+  <Step title="Store API keys as secrets">
+    Never commit keys. Use CI secret management.
+  </Step>
+  <Step title="Add [skip ci] to auto-commits">
+    Prevent infinite loops when CI commits back to the repo
+  </Step>
+  <Step title="Consider local models for high-frequency CI">
+    Avoid API costs with Ollama for frequent regeneration
+  </Step>
+</Steps>
+
+## Summary
+
+llmake's content-addressing and lockfile system make it ideal for CI/CD:
+
+- **Incremental**: Only regenerate when sources change
+- **Fast**: Skip tasks with unchanged inputs
+- **Reliable**: Exit codes integrate with any CI system
+- **Flexible**: Use `--dry-run`, `--force`, or normal mode depending on your needs
+
+Whether you're verifying files stay in sync or automatically regenerating on every push, llmake fits seamlessly into your pipeline.

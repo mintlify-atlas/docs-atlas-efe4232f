@@ -1,0 +1,439 @@
+---
+title: Exit Codes
+description: Complete reference for llmake exit codes and error scenarios
+---
+
+llmake uses standard UNIX exit codes to indicate success or different types of failures. These exit codes are useful for scripting, CI/CD pipelines, and error handling.
+
+## Exit Code Reference
+
+<ParamField path="0" type="Success">
+  All tasks completed successfully or were skipped due to no changes. The operation completed as expected.
+</ParamField>
+
+<ParamField path="1" type="General Failure">
+  Task execution failed, invalid arguments provided, or general errors occurred during execution.
+</ParamField>
+
+<ParamField path="2" type="Configuration Not Found">
+  No configuration file was found in the current directory or specified path.
+</ParamField>
+
+## Exit Code 0: Success
+
+The success exit code is returned in the following scenarios:
+
+### All Tasks Completed Successfully
+
+```bash
+llmake
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — 2 files changed (src/index.ts, src/config.ts)
+# llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: readme — done (4.2s)
+# llmake: api-docs — no changes
+# llmake: changelog — no changes
+# Exit code: 0
+```
+
+All tasks that had changes ran successfully, and tasks without changes were skipped.
+
+### No Tasks Had Changes
+
+```bash
+llmake
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — no changes
+# llmake: api-docs — no changes
+# llmake: changelog — no changes
+# Exit code: 0
+```
+
+This is considered success because there was nothing to do.
+
+### Specific Task Completed Successfully
+
+```bash
+llmake readme
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — 1 files changed (src/index.ts)
+# llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: readme — done (3.8s)
+# Exit code: 0
+```
+
+### Specific Task Had No Changes
+
+```bash
+llmake readme
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — no changes
+# Exit code: 0
+```
+
+### Help or Version Displayed
+
+```bash
+llmake --help
+# [help text displayed]
+# Exit code: 0
+
+llmake --version
+# 0.1.1
+# Exit code: 0
+```
+
+### Status Check Completed
+
+```bash
+llmake --status
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — changed (2 files)
+# llmake: api-docs — up to date
+# llmake: changelog — changed (5 files)
+# Exit code: 0
+```
+
+Status mode exits successfully even if tasks have changes. It only reports the state.
+
+### Dry Run Completed
+
+```bash
+llmake --dry-run
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — would run: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: api-docs — no changes, would skip
+# llmake: changelog — would run: llm -m gpt-4o ...
+# Exit code: 0
+```
+
+### Initialization Succeeded
+
+```bash
+llmake --init
+# llmake: created llmake.jsonc
+# Exit code: 0
+```
+
+### No Files Matched
+
+```bash
+llmake
+# llmake: loaded llmake.jsonc (2 tasks)
+# llmake: docs — no files matched
+# llmake: readme — no changes
+# Exit code: 0
+```
+
+When a task's glob patterns don't match any files, it's not considered an error.
+
+## Exit Code 1: General Failure
+
+Exit code 1 indicates various types of failures during execution:
+
+### Task Execution Failed
+
+When a runner command exits with a non-zero code:
+
+```bash
+llmake
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — 2 files changed (src/index.ts, src/config.ts)
+# llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: readme — failed (exit 2, 1.3s)
+# Exit code: 1
+```
+
+The task's lockfile entry is not updated, so it will retry on the next run.
+
+**Source code reference:** `src/index.ts:318`
+
+### Multiple Tasks with Failures
+
+When running all tasks, if any task fails, the exit code is 1:
+
+```bash
+llmake
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: readme — 2 files changed (src/index.ts, src/config.ts)
+# llmake: readme — running: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: readme — failed (exit 1, 2.1s)
+# llmake: api-docs — 1 files changed (src/types.ts)
+# llmake: api-docs — running: claude --allowed-tools Read,Write,Edit --print ...
+# llmake: api-docs — done (3.5s)
+# llmake: changelog — no changes
+# Exit code: 1
+```
+
+llmake continues processing remaining tasks but exits with code 1 if any failed.
+
+### Invalid Task Name
+
+```bash
+llmake unknown-task
+# llmake: loaded llmake.jsonc (3 tasks)
+# llmake: unknown task: unknown-task
+# Exit code: 1
+```
+
+**Source code reference:** `src/index.ts:301`
+
+### Invalid Arguments
+
+```bash
+llmake --unknown-flag
+# llmake: Unknown option '--unknown-flag'
+# Exit code: 1
+```
+
+**Source code reference:** `src/index.ts:274`
+
+### Configuration File Parse Error
+
+When the config file exists but contains invalid syntax:
+
+```bash
+llmake
+# llmake: SyntaxError: Unexpected token } in JSON at position 42
+# Exit code: 1
+```
+
+**Source code reference:** `src/index.ts:116`
+
+### Initialization Failed
+
+When trying to initialize but `llmake.jsonc` already exists:
+
+```bash
+llmake --init
+# llmake: llmake.jsonc already exists
+# Exit code: 1
+```
+
+**Source code reference:** `src/index.ts:90`
+
+### Uncaught Runtime Errors
+
+Any uncaught errors during execution:
+
+```bash
+llmake
+# llmake: Error: EACCES: permission denied, open '.llmake.lock'
+# Exit code: 1
+```
+
+**Source code reference:** `src/index.ts:326`
+
+## Exit Code 2: Configuration Not Found
+
+Exit code 2 is specifically for missing configuration files:
+
+### No Config File Found
+
+When llmake can't find any supported config file:
+
+```bash
+llmake
+# llmake: no config file found (llmake.ts, llmake.jsonc, llmake.json, llmake.toml)
+# Exit code: 2
+```
+
+**Source code reference:** `src/index.ts:109`
+
+This searches for:
+1. `llmake.ts`
+2. `llmake.jsonc`
+3. `llmake.json`
+4. `llmake.toml`
+
+### Custom Config Path Not Found
+
+When using `--config` with a path that doesn't exist:
+
+```bash
+llmake --config ./configs/missing.jsonc
+# llmake: no config file found (llmake.ts, llmake.jsonc, llmake.json, llmake.toml)
+# Exit code: 2
+```
+
+<Note>
+Exit code 2 is distinct from exit code 1 to allow scripts to differentiate between "config not found" (fixable by running `llmake --init` or providing a path) and other errors.
+</Note>
+
+## Using Exit Codes in Scripts
+
+### Bash Scripts
+
+```bash
+#!/bin/bash
+
+llmake --status
+STATUS=$?
+
+if [ $STATUS -eq 0 ]; then
+  echo "All tasks are up to date"
+elif [ $STATUS -eq 1 ]; then
+  echo "Error checking status"
+  exit 1
+elif [ $STATUS -eq 2 ]; then
+  echo "No config file found. Run 'llmake --init' to create one."
+  exit 2
+fi
+```
+
+### Make Targets
+
+```makefile
+.PHONY: check-docs
+check-docs:
+	@llmake --status || (echo "Docs are out of date. Run 'llmake' to update." && exit 1)
+
+.PHONY: update-docs
+update-docs:
+	@llmake || (echo "Failed to update docs" && exit 1)
+```
+
+### CI/CD Examples
+
+<CodeGroup>
+
+```yaml GitHub Actions
+name: Check Documentation
+
+on: [pull_request]
+
+jobs:
+  check-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install llmake
+        run: npm install -g llmake
+      
+      - name: Verify docs are up to date
+        run: |
+          if ! llmake --status; then
+            echo "::error::Documentation is out of date. Run 'llmake' locally and commit the changes."
+            exit 1
+          fi
+```
+
+```yaml GitLab CI
+check-docs:
+  stage: test
+  script:
+    - npm install -g llmake
+    - llmake --status
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: false
+```
+
+```groovy Jenkins
+stage('Check Documentation') {
+  steps {
+    sh '''
+      npm install -g llmake
+      if ! llmake --status; then
+        echo "Documentation is out of date"
+        exit 1
+      fi
+    '''
+  }
+}
+```
+
+</CodeGroup>
+
+### Pre-commit Hook
+
+```bash
+#!/bin/bash
+# .git/hooks/pre-commit
+
+echo "Checking if generated files are up to date..."
+
+llmake --status
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 2 ]; then
+  echo "No llmake config found, skipping check"
+  exit 0
+elif [ $EXIT_CODE -eq 1 ]; then
+  echo "Error running llmake"
+  exit 1
+fi
+
+# Check if any tasks have changes
+if llmake --status 2>&1 | grep -q "changed"; then
+  echo "Generated files are out of date. Run 'llmake' before committing."
+  exit 1
+fi
+
+echo "All generated files are up to date"
+exit 0
+```
+
+## Exit Code Summary Table
+
+| Code | Meaning | Common Causes | Recovery |
+|------|---------|---------------|----------|
+| `0` | Success | Tasks completed, no changes, or info displayed | None needed |
+| `1` | General failure | Task failed, invalid args, parse error, file exists | Check error message, fix issue |
+| `2` | Config not found | No config file in directory or path | Run `llmake --init` or provide path |
+
+## Debugging Exit Codes
+
+To see the actual exit code after running llmake:
+
+**Bash/Zsh:**
+
+```bash
+llmake
+echo $?
+```
+
+**PowerShell:**
+
+```powershell
+llmake
+echo $LASTEXITCODE
+```
+
+**Fish:**
+
+```fish
+llmake
+echo $status
+```
+
+## Best Practices
+
+### CI/CD Pipelines
+
+- Use `llmake --status` to check if files are up to date without running tasks
+- Fail the build on exit code 1 or 2
+- Consider using `llmake --dry-run` to preview what would run
+
+### Pre-commit Hooks
+
+- Check status with `llmake --status`
+- Allow exit code 2 (no config) to pass through
+- Block commits if tasks have pending changes
+
+### Development Workflows
+
+- Run `llmake` regularly during development
+- Use `llmake --force` when you change prompts or want to regenerate
+- Use `llmake <task>` to update specific generated files
+
+### Error Handling
+
+- Exit code 0: Continue normally
+- Exit code 1: Log error, investigate cause, retry if appropriate
+- Exit code 2: Initialize config or provide correct path
+
+<Note>
+llmake follows the UNIX convention where exit code 0 means success and non-zero means failure. Always check exit codes in scripts and CI/CD pipelines.
+</Note>

@@ -1,0 +1,265 @@
+---
+title: Configuration Formats
+description: All supported config formats for llmake
+---
+
+llmake supports four configuration formats to fit your workflow and project needs. Each format is functionally equivalent, so choose the one that best suits your preferences.
+
+## Supported Formats
+
+<Tabs>
+  <Tab title="TypeScript">
+    TypeScript configs (`llmake.ts`) enable dynamic configuration with full type safety. This is the most flexible format.
+
+    ### Async Function Export
+
+    Export an async function that returns your configuration. Perfect for reading from external files or making async computations:
+
+    ```typescript
+    // llmake.ts
+    import type { LlmakeConfig } from "llmake";
+
+    export default async (): Promise<LlmakeConfig> => {
+      const pkg = await Bun.file("package.json").json();
+
+      return {
+        runner: `claude --allowed-tools Read,Write,Edit --print {prompt}`,
+        tasks: {
+          readme: {
+            prompt: `Update README.md for ${pkg.name}@${pkg.version}.
+                     Include installation instructions and API reference.`,
+            sources: ["src/**/*.ts"],
+            exclude: ["src/**/*.test.ts"],
+          },
+          changelog: {
+            prompt: `Update CHANGELOG.md. Current version is ${pkg.version}.`,
+            sources: ["src/**/*.ts", "package.json"],
+          },
+        },
+      };
+    };
+    ```
+
+    ### Static Object Export
+
+    For simpler cases, export a static object:
+
+    ```typescript
+    // llmake.ts
+    import type { LlmakeConfig } from "llmake";
+
+    export default {
+      runner: "claude --print {prompt}",
+      tasks: {
+        readme: {
+          prompt: "Update the README.",
+          sources: ["src/**/*.ts"],
+        },
+      },
+    } satisfies LlmakeConfig;
+    ```
+
+    <Note>
+    TypeScript configs are loaded using dynamic imports. The module must export a default export that is either a config object or an async function returning a config object.
+    </Note>
+
+    <CodeGroup>
+    ```typescript src/config.ts
+    if (ext === "ts") {
+      const module = await import(resolve(path));
+      const raw =
+        typeof module.default === "function"
+          ? await module.default()
+          : module.default;
+      return validateConfig(raw);
+    }
+    ```
+    </CodeGroup>
+  </Tab>
+
+  <Tab title="JSONC">
+    JSONC (`llmake.jsonc`) is JSON with comments and trailing commas. This is the recommended format for most projects.
+
+    ```jsonc
+    {
+      // Default runner command - {prompt} will be replaced with the assembled prompt
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": {
+        "readme": {
+          "prompt": "Update README.md based on the current codebase. Keep it concise.",
+          "sources": ["src/**/*.ts"],
+          "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts"]
+        },
+        "api-docs": {
+          "prompt": "Generate API documentation for the public exports.",
+          "sources": ["src/index.ts", "src/types.ts"],
+          // Override runner for this specific task
+          "runner": "llm -m gpt-4o {prompt}"
+        },
+        "changelog": {
+          "prompt": "Update CHANGELOG.md with recent changes.",
+          "sources": ["src/**/*.ts", "package.json"]
+        }
+      }
+    }
+    ```
+
+    <Note>
+    Comments in JSONC files are automatically stripped during parsing using the `strip-json-comments` library.
+    </Note>
+
+    <CodeGroup>
+    ```typescript src/config.ts
+    if (ext === "json" || ext === "jsonc") {
+      return validateConfig(JSON.parse(stripJsonComments(text)));
+    }
+    ```
+    </CodeGroup>
+  </Tab>
+
+  <Tab title="JSON">
+    Standard JSON (`llmake.json`) for strict JSON compliance. No comments or trailing commas allowed.
+
+    ```json
+    {
+      "runner": "claude --print {prompt}",
+      "tasks": {
+        "readme": {
+          "prompt": "Update README.md based on the codebase.",
+          "sources": ["src/**/*.ts"],
+          "exclude": ["src/**/*.test.ts"]
+        },
+        "api-docs": {
+          "prompt": "Generate API documentation.",
+          "sources": ["src/index.ts", "src/types.ts"],
+          "runner": "llm -m gpt-4o {prompt}"
+        }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="TOML">
+    TOML (`llmake.toml`) for those who prefer TOML's syntax. Ideal for projects already using TOML.
+
+    ```toml
+    runner = "claude --print {prompt}"
+
+    [tasks.readme]
+    prompt = "Update README.md based on the codebase."
+    sources = ["src/**/*.ts"]
+    exclude = ["src/**/*.test.ts"]
+
+    [tasks.api-docs]
+    prompt = "Generate API documentation."
+    sources = ["src/index.ts", "src/types.ts"]
+    runner = "llm -m gpt-4o {prompt}"
+
+    [tasks.changelog]
+    prompt = "Update CHANGELOG.md with recent changes."
+    sources = ["src/**/*.ts", "package.json"]
+    ```
+
+    <Note>
+    TOML files are parsed using the `smol-toml` library which supports the TOML v1.0.0 specification.
+    </Note>
+
+    <CodeGroup>
+    ```typescript src/config.ts
+    if (ext === "toml") {
+      return validateConfig(parseToml(text));
+    }
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Format Priority
+
+When multiple config files exist in the same directory, llmake uses the first one it finds:
+
+1. **`llmake.ts`** - TypeScript (highest priority)
+2. **`llmake.jsonc`** - JSON with comments
+3. **`llmake.json`** - Standard JSON
+4. **`llmake.toml`** - TOML (lowest priority)
+
+<Warning>
+Only one config file will be used. If you have both `llmake.ts` and `llmake.jsonc`, only `llmake.ts` will be loaded.
+</Warning>
+
+## Loading Process
+
+The config loading process differs slightly by format:
+
+<CodeGroup>
+```typescript src/config.ts
+export async function loadConfig(path: string): Promise<LlmakeConfig> {
+  const ext = path.split(".").pop()?.toLowerCase();
+
+  if (ext === "ts") {
+    const module = await import(resolve(path));
+    const raw =
+      typeof module.default === "function"
+        ? await module.default()
+        : module.default;
+    return validateConfig(raw);
+  }
+
+  const text = await readFile(path, "utf-8");
+
+  if (ext === "json" || ext === "jsonc") {
+    return validateConfig(JSON.parse(stripJsonComments(text)));
+  }
+
+  if (ext === "toml") {
+    return validateConfig(parseToml(text));
+  }
+
+  throw new Error(`llmake: unsupported config format: ${ext}`);
+}
+```
+</CodeGroup>
+
+- **TypeScript**: Dynamically imported, supports async functions
+- **JSON/JSONC**: Parsed with comment stripping
+- **TOML**: Parsed using TOML spec
+- All formats are validated with the same schema after loading
+
+## Type Safety
+
+For TypeScript configs, import the types for full autocomplete and validation:
+
+```typescript
+import type { LlmakeConfig, TaskConfig } from "llmake";
+
+export default {
+  runner: "claude --print {prompt}",
+  tasks: {
+    readme: {
+      prompt: "Update README",
+      sources: ["src/**/*.ts"],
+    } satisfies TaskConfig,
+  },
+} satisfies LlmakeConfig;
+```
+
+## Using `--init`
+
+Generate a starter config with the `--init` flag:
+
+```bash
+llmake --init
+```
+
+This creates a `llmake.jsonc` file in your current directory with example tasks and comments to help you get started.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tasks" icon="list-check" href="/configuration/tasks">
+    Learn about task configuration options
+  </Card>
+  <Card title="Runners" icon="terminal" href="/configuration/runners">
+    Configure runners for different LLM providers
+  </Card>
+</CardGroup>

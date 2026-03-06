@@ -1,0 +1,341 @@
+---
+title: Runners
+description: Configure LLM runners for code generation
+---
+
+Runners are the commands llmake executes to generate or update your code. They can be any CLI tool that accepts a prompt as input, including Claude Code, OpenAI's API via CLI wrappers, local models via Ollama, or custom scripts.
+
+## What is a Runner?
+
+A runner is a shell command that:
+
+1. Accepts a prompt as input (via the `{prompt}` placeholder)
+2. Processes source files and generates or updates code
+3. Returns an exit code (0 for success, non-zero for failure)
+
+llmake is **runner-agnostic** - it doesn't care what tool you use as long as it follows this pattern.
+
+## The `{prompt}` Placeholder
+
+Every runner **must** contain the `{prompt}` placeholder. This is where llmake injects the assembled prompt.
+
+<CodeGroup>
+```typescript src/config.ts
+const LlmakeConfigSchema = z
+  .object({
+    runner: z
+      .string()
+      .min(1, "runner must not be empty")
+      .refine(
+        (s) => s.includes("{prompt}"),
+        "runner must contain {prompt} placeholder"
+      ),
+    // ...
+  })
+  .passthrough();
+```
+</CodeGroup>
+
+<Warning>
+If your runner doesn't contain `{prompt}`, validation will fail with the error: "runner must contain {prompt} placeholder"
+</Warning>
+
+### How `{prompt}` Works
+
+When llmake executes a task, it:
+
+1. Assembles a prompt in XML format with your task prompt and changed files
+2. **Shell-escapes** the prompt for safe substitution
+3. Replaces `{prompt}` with the escaped prompt
+4. Executes the command in a login shell (`-l -i -c`)
+
+The prompt llmake generates looks like this:
+
+```xml
+<prompt>Update README.md based on the current codebase. Keep it concise.</prompt>
+<changed-files>src/index.ts, src/config.ts, src/types.ts</changed-files>
+```
+
+## Default Runner
+
+The `runner` field at the top level of your config defines the default runner for all tasks:
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md",
+      "sources": ["src/**/*.ts"]
+    }
+  }
+}
+```
+
+All tasks will use this runner unless they specify their own override.
+
+## Task-Level Runner Overrides
+
+Tasks can override the default runner with their own `runner` field:
+
+```jsonc
+{
+  "runner": "claude --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README.md",
+      "sources": ["src/**/*.ts"]
+      // Uses default runner: claude
+    },
+    "quick-task": {
+      "prompt": "Fix typos in comments",
+      "sources": ["src/**/*.ts"],
+      "runner": "llm -m gpt-4o-mini {prompt}"  // Override: faster, cheaper model
+    }
+  }
+}
+```
+
+<Note>
+Task-level runners are validated the same way as the default runner - they must contain the `{prompt}` placeholder.
+</Note>
+
+<CodeGroup>
+```typescript src/config.ts
+const TaskConfigSchema = z
+  .object({
+    // ...
+    runner: z
+      .string()
+      .refine(
+        (s) => s.includes("{prompt}"),
+        "runner must contain {prompt} placeholder"
+      )
+      .optional(),
+  })
+  .passthrough();
+```
+</CodeGroup>
+
+## Runner Examples
+
+llmake works with any CLI tool that accepts a prompt. Here are examples for popular LLM providers:
+
+### Claude Code
+
+[Claude Code](https://claude.ai/code) is Anthropic's CLI tool for code generation:
+
+```jsonc
+{
+  "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}"
+}
+```
+
+- `--allowed-tools` specifies which file operations Claude can perform
+- `--print` outputs the response to stdout
+
+### OpenAI via `llm` CLI
+
+Using Simon Willison's [`llm`](https://llm.datasette.io/) CLI:
+
+```jsonc
+{
+  "runner": "llm -m gpt-4o {prompt}"
+}
+```
+
+Or with a different model:
+
+```jsonc
+{
+  "runner": "llm -m gpt-4o-mini {prompt}"
+}
+```
+
+### Anthropic via `llm` CLI
+
+The `llm` CLI also supports Anthropic models:
+
+```jsonc
+{
+  "runner": "llm -m claude-3-opus {prompt}"
+}
+```
+
+### Local Models via Ollama
+
+Use [Ollama](https://ollama.ai/) for local models:
+
+```jsonc
+{
+  "runner": "ollama run llama3 {prompt}"
+}
+```
+
+Or other local models:
+
+```jsonc
+{
+  "runner": "ollama run codellama:70b {prompt}"
+}
+```
+
+### Custom Scripts
+
+Use a custom bash script as your runner:
+
+```jsonc
+{
+  "runner": "./scripts/generate.sh {prompt}"
+}
+```
+
+Your script receives the prompt as the first argument:
+
+```bash
+#!/bin/bash
+# scripts/generate.sh
+
+PROMPT="$1"
+
+# Your custom logic here
+# Parse the prompt, call APIs, generate code, etc.
+
+echo "Processing: $PROMPT"
+```
+
+## Shell Execution
+
+Runners are executed in a **login shell** to ensure your environment is properly loaded:
+
+```bash
+bash -l -i -c "your-runner {prompt}"
+```
+
+This means:
+
+- Your `.bashrc`, `.zshrc`, or other shell config is sourced
+- Your `PATH` includes all your normal shell paths
+- Environment variables from your shell config are available
+
+<Note>
+The `{prompt}` placeholder is safely shell-escaped before substitution to prevent injection attacks.
+</Note>
+
+## Multiple Tasks, Different Runners
+
+You can mix and match runners based on task requirements:
+
+```jsonc
+{
+  "runner": "claude --print {prompt}",
+  "tasks": {
+    "readme": {
+      "prompt": "Update README with installation and usage",
+      "sources": ["src/**/*.ts"]
+      // Uses Claude (default)
+    },
+    "types": {
+      "prompt": "Generate TypeScript types from OpenAPI spec",
+      "sources": ["api/openapi.yaml"],
+      "runner": "llm -m gpt-4o {prompt}"
+      // Uses GPT-4o for better schema understanding
+    },
+    "comments": {
+      "prompt": "Add JSDoc comments to exported functions",
+      "sources": ["src/index.ts"],
+      "runner": "llm -m gpt-4o-mini {prompt}"
+      // Uses mini model for simple task
+    },
+    "changelog": {
+      "prompt": "Update CHANGELOG.md based on git history",
+      "sources": ["src/**/*.ts"],
+      "runner": "./scripts/changelog.sh {prompt}"
+      // Uses custom script with git integration
+    }
+  }
+}
+```
+
+## Complete Configuration Example
+
+Here's a full example from the llmake repository itself:
+
+<Tabs>
+  <Tab title="JSONC">
+    ```jsonc
+    {
+      "runner": "claude --allowed-tools Read,Write,Edit --print {prompt}",
+      "tasks": {
+        "readme": {
+          "prompt": "Generate a comprehensive README.md for this CLI tool based on the source code. Include: installation, usage examples for all CLI flags, configuration file formats (jsonc, json, toml, ts), and a quick-start guide.",
+          "sources": ["src/**/*.ts"],
+          "exclude": ["src/**/*.test.ts"]
+        }
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import type { LlmakeConfig } from "llmake";
+
+    export default async (): Promise<LlmakeConfig> => {
+      const pkg = await Bun.file("package.json").json();
+
+      return {
+        runner: `claude --allowed-tools Read,Write,Edit --print {prompt}`,
+        tasks: {
+          readme: {
+            prompt: `Update README.md for ${pkg.name}@${pkg.version}.
+                     Include installation instructions and API reference.`,
+            sources: ["src/**/*.ts"],
+            exclude: ["src/**/*.test.ts"],
+          },
+          changelog: {
+            prompt: `Update CHANGELOG.md. Current version is ${pkg.version}.`,
+            sources: ["src/**/*.ts", "package.json"],
+          },
+        },
+      };
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Runner Best Practices
+
+<Card title="Use specific model versions" icon="tag">
+  Instead of `gpt-4`, use `gpt-4o` or `gpt-4-turbo` for reproducible results.
+</Card>
+
+<Card title="Match runner to task complexity" icon="layer-group">
+  Use faster/cheaper models for simple tasks, more powerful models for complex generation.
+</Card>
+
+<Card title="Test with --dry-run first" icon="flask">
+  Use `llmake --dry-run` to see what would run before executing expensive API calls.
+</Card>
+
+<Card title="Include necessary tools" icon="wrench">
+  For Claude Code, specify `--allowed-tools Read,Write,Edit` so it can modify files.
+</Card>
+
+## Exit Codes
+
+Your runner should return:
+
+- **0** for success
+- **Non-zero** for failure (llmake will report the error and exit with code 1)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CLI Reference" icon="rectangle-terminal" href="/cli/commands">
+    Learn how to run tasks from the command line
+  </Card>
+  <Card title="Content Addressing" icon="fingerprint" href="/concepts/content-addressing">
+    Understand the content-addressed build system
+  </Card>
+</CardGroup>

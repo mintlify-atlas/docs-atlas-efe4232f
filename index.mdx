@@ -1,97 +1,129 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "llmake"
+description: "Content-addressed LLM-powered build system for derived files — make, but the compiler is an LLM"
 ---
 
-## Setting up
+<div style={{
+  background: 'linear-gradient(135deg, #020627 0%, #11161e 100%)',
+  borderRadius: '12px',
+  padding: '48px 32px',
+  marginBottom: '32px',
+  border: '1px solid rgba(96,99,146,0.3)'
+}}>
+  <h1 style={{
+    fontSize: '48px',
+    fontWeight: '700',
+    marginBottom: '16px',
+    color: '#ffffff',
+    fontFamily: 'Inter, sans-serif'
+  }}>
+    llmake
+  </h1>
+  <p style={{
+    fontSize: '20px',
+    color: '#cfd0d2',
+    marginBottom: '24px',
+    fontFamily: 'Inter, sans-serif'
+  }}>
+    Content-addressed, declarative, LLM-powered build system for derived files.
+  </p>
+  <p style={{
+    fontSize: '18px',
+    color: '#848c8e',
+    marginBottom: '32px',
+    fontFamily: 'Inter, sans-serif'
+  }}>
+    <code style={{background: 'rgba(48,54,79,1)', padding: '4px 8px', borderRadius: '4px'}}>make</code> where the compiler is an LLM.
+  </p>
+  <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap'}}>
+    <a href="/quickstart" style={{
+      background: '#238636',
+      color: '#ffffff',
+      padding: '12px 24px',
+      borderRadius: '6px',
+      textDecoration: 'none',
+      fontWeight: '600',
+      fontSize: '16px',
+      fontFamily: 'Inter, sans-serif',
+      display: 'inline-block'
+    }}>
+      Get Started
+    </a>
+    <a href="https://github.com/cyrusnuevodia/llmake" style={{
+      background: 'transparent',
+      color: '#ffffff',
+      padding: '12px 24px',
+      borderRadius: '6px',
+      textDecoration: 'none',
+      fontWeight: '600',
+      fontSize: '16px',
+      fontFamily: 'Inter, sans-serif',
+      display: 'inline-block',
+      border: '1px solid rgba(96,99,146,1)'
+    }}>
+      View on GitHub
+    </a>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+## Why llmake?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+No more regenerating docs when nothing changed. No more forgetting to update generated files when sources change.
 
-## Make it yours
+llmake tracks your source files with SHA-256 hashes, compares against a lockfile, and only runs your LLM when changes are detected. It's `make`, but for LLM-powered code generation.
 
-Design a docs site that looks great and empowers your users.
+## Key Features
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Content-Addressed Hashing" icon="fingerprint">
+    SHA-256 hashing for incremental builds. Only regenerate when source files actually change.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Declarative Configuration" icon="file-code">
+    Configure tasks in JSON, JSONC, TOML, or TypeScript. Define prompts, sources, and runners.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Runner-Agnostic" icon="plug">
+    Works with Claude Code, OpenAI, Ollama, or any LLM CLI that accepts prompts.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Lockfile Tracking" icon="lock">
+    Commit `.llmake.lock` for team-wide consistency and CI builds.
   </Card>
-</Columns>
+  <Card title="Flexible Glob Patterns" icon="filter">
+    Match source files with glob patterns and exclude specific files.
+  </Card>
+  <Card title="Multiple CLI Modes" icon="terminal">
+    Force run, dry run, status check, and more. Full control over task execution.
+  </Card>
+</CardGroup>
 
-## Create beautiful pages
+## Quick Example
 
-Everything you need to create world-class documentation.
+```bash
+# Install globally
+npm i -g llmake
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+# Initialize config
+llmake --init
 
-## Need inspiration?
+# Run all tasks with changes
+llmake
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+# Check what's stale
+llmake --status
+```
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install llmake globally or run without installing.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in under 5 minutes.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Learn how to configure tasks, runners, and source files.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/commands">
+    Complete command-line reference for all flags and options.
+  </Card>
+</CardGroup>
