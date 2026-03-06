@@ -192,8 +192,6 @@ Here's a full configuration with multiple tasks:
 
   <Tab title="TypeScript">
     ```typescript
-    import type { LlmakeConfig } from "llmake";
-
     export default {
       runner: "claude --allowed-tools Read,Write,Edit --print {prompt}",
       tasks: {
@@ -212,7 +210,7 @@ Here's a full configuration with multiple tasks:
           sources: ["src/**/*.ts", "package.json"],
         },
       },
-    } satisfies LlmakeConfig;
+    };
     ```
   </Tab>
 </Tabs>

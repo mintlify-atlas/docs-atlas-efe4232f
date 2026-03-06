@@ -279,9 +279,7 @@ Here's a full example from the llmake repository itself:
 
   <Tab title="TypeScript">
     ```typescript
-    import type { LlmakeConfig } from "llmake";
-
-    export default async (): Promise<LlmakeConfig> => {
+    export default async () => {
       const pkg = await Bun.file("package.json").json();
 
       return {

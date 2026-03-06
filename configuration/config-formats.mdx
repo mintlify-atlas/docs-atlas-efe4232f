@@ -17,9 +17,7 @@ llmake supports four configuration formats to fit your workflow and project need
 
     ```typescript
     // llmake.ts
-    import type { LlmakeConfig } from "llmake";
-
-    export default async (): Promise<LlmakeConfig> => {
+    export default async () => {
       const pkg = await Bun.file("package.json").json();
 
       return {
@@ -46,8 +44,6 @@ llmake supports four configuration formats to fit your workflow and project need
 
     ```typescript
     // llmake.ts
-    import type { LlmakeConfig } from "llmake";
-
     export default {
       runner: "claude --print {prompt}",
       tasks: {
@@ -56,7 +52,7 @@ llmake supports four configuration formats to fit your workflow and project need
           sources: ["src/**/*.ts"],
         },
       },
-    } satisfies LlmakeConfig;
+    };
     ```
 
     <Note>
@@ -227,21 +223,22 @@ export async function loadConfig(path: string): Promise<LlmakeConfig> {
 
 ## Type Safety
 
-For TypeScript configs, import the types for full autocomplete and validation:
+TypeScript configs are validated at runtime using Zod schemas. While llmake doesn't export types for programmatic use (it's a CLI-only tool), the validation will catch configuration errors:
 
 ```typescript
-import type { LlmakeConfig, TaskConfig } from "llmake";
-
+// llmake.ts
 export default {
   runner: "claude --print {prompt}",
   tasks: {
     readme: {
       prompt: "Update README",
       sources: ["src/**/*.ts"],
-    } satisfies TaskConfig,
+    },
   },
-} satisfies LlmakeConfig;
+};
 ```
+
+If you want type checking in your editor, you can copy the interface definitions from the [source code](https://github.com/cyrusnuevodia/llmake/blob/main/src/types.ts) into your project.
 
 ## Using `--init`
 
