@@ -1,0 +1,82 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "llmake",
+  "projectDescription": "Content-addressed LLM-powered build system for derived files — make, but the compiler is an LLM",
+  "theme": "aspen",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/content-addressing",
+              "concepts/prompt-assembly",
+              "concepts/lockfile"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/config-formats",
+              "configuration/tasks",
+              "configuration/runners"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/glob-patterns",
+              "guides/runner-examples",
+              "guides/ci-integration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/commands",
+              "cli/flags",
+              "cli/exit-codes"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Content-addressed SHA-256 hashing for incremental builds",
+    "Declarative task configuration with multiple format support (JSON, JSONC, TOML, TypeScript)",
+    "LLM-powered code generation with runner-agnostic CLI",
+    "Lockfile tracking for team-wide consistency and CI builds",
+    "Flexible glob patterns for source file matching",
+    "Multiple CLI modes: force run, dry run, status check"
+  ],
+  "publicApiSurface": [
+    "llmake - Run all tasks with changes",
+    "llmake <task> - Run specific task",
+    "llmake --force - Run regardless of hash state",
+    "llmake --dry-run - Show what would run",
+    "llmake --status - Show per-task change status",
+    "llmake --init - Create starter config",
+    "llmake --config <path> - Use specific config file",
+    "LlmakeConfig type",
+    "TaskConfig type",
+    "LlmakeLock type",
+    "TaskLockEntry type",
+    "TaskDiff type"
+  ]
+}
